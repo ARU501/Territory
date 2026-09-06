@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { isCloudMode } from "@/lib/supabase";
+import { slugifyTeam } from "@/lib/team";
 import { IconDoor } from "./Icons";
 
 interface GateProps {
@@ -15,7 +16,7 @@ export default function Gate({ initialTeam, initialRep, onEnter }: GateProps) {
   const [rep, setRep] = useState(initialRep);
   const [touched, setTouched] = useState(false);
 
-  const cleanTeam = team.trim();
+  const cleanTeam = slugifyTeam(team);
   const cleanRep = rep.trim();
   const ready = cleanTeam.length >= 3 && cleanRep.length >= 1;
 
@@ -57,6 +58,12 @@ export default function Gate({ initialTeam, initialRep, onEnter }: GateProps) {
         <p className="field-help">
           Any word your crew agrees on. Everyone who types the same code shares one map, so pick
           something other teams will not guess.
+          {cleanTeam && cleanTeam !== team.trim().toLowerCase() && (
+            <>
+              {" "}
+              Yours will be saved as <strong>{cleanTeam}</strong>.
+            </>
+          )}
         </p>
 
         <label className="field-label" htmlFor="rep" style={{ marginTop: 16 }}>
@@ -75,7 +82,7 @@ export default function Gate({ initialTeam, initialRep, onEnter }: GateProps) {
 
         {touched && !ready && (
           <p className="field-help" style={{ color: "var(--danger)", marginTop: 12 }}>
-            Enter a team code of at least 3 characters and your name.
+            Enter a team code with at least 3 letters or numbers, plus your name.
           </p>
         )}
 

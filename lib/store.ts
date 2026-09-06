@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase, isCloudMode } from "./supabase";
+import { slugifyTeam } from "./team";
 import type { House, LatLng, Status, Territory } from "./types";
 
 export type SyncState = "solo" | "connecting" | "live" | "error";
 
-const soloKey = (team: string) => `doorknock:data:${team.toLowerCase()}`;
+const soloKey = (team: string) => `doorknock:data:${slugifyTeam(team)}`;
 
 interface SoloData {
   territories: Territory[];
@@ -59,7 +60,7 @@ export function useCanvassData(team: string, rep: string) {
   const [sync, setSync] = useState<SyncState>(isCloudMode ? "connecting" : "solo");
   const [error, setError] = useState<string | null>(null);
 
-  const teamCode = team.trim().toLowerCase();
+  const teamCode = slugifyTeam(team);
   const stateRef = useRef<SoloData>({ territories: [], houses: [] });
   stateRef.current = { territories, houses };
 
