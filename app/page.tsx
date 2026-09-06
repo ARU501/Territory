@@ -65,13 +65,17 @@ export default function Page() {
   const mapRef = useRef<MapHandle | null>(null);
   const toastSeq = useRef(0);
 
-  const data = useCanvassData(team, rep);
-
   const pushToast = useCallback((text: string, kind: Toast["kind"] = "info") => {
     const id = ++toastSeq.current;
     setToasts((prev) => [...prev, { id, text, kind }]);
-    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 5200);
+    // A failed write is worth reading twice; a confirmation is not.
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), kind === "err" ? 9000 : 5200);
   }, []);
+
+  // Writes that fail on a patchy connection used to vanish silently.
+  const reportWriteError = useCallback((message: string) => pushToast(message, "err"), [pushToast]);
+
+  const data = useCanvassData(team, rep, reportWriteError);
 
   // ---- restore session ----------------------------------------------------
   useEffect(() => {

@@ -56,7 +56,9 @@ below.
 1. Go to https://supabase.com and create a project. Any region near your crew is fine.
 2. In the project, open **SQL Editor → New query**, paste the whole contents of
    [`supabase-schema.sql`](./supabase-schema.sql), and hit **Run**. It creates the two
-   tables, opens up access, and turns on live updates.
+   tables, installs the team-scoped access policies, and turns on live updates.
+   (With a Postgres URL to hand you can instead run `node scripts/run-sql.mjs
+   supabase-schema.sql`.)
 3. Open **Project Settings → API** and copy two values:
    - **Project URL**
    - the **anon / public** key (not the service role key)
@@ -65,7 +67,12 @@ below.
    ```
    NEXT_PUBLIC_SUPABASE_URL=https://xxxxxxxx.supabase.co
    NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOi...
+   SUPABASE_JWT_SECRET=<Project Settings → API → JWT Secret>
    ```
+
+   The first two are public and end up in the browser bundle. `SUPABASE_JWT_SECRET` must
+   NOT have a `NEXT_PUBLIC_` prefix: it stays on the server, where the token route signs
+   with it.
 
 5. Restart `npm run dev`. The badge in the top bar should read **Live** instead of
    **This device**.
@@ -77,9 +84,13 @@ below.
 1. Put this folder on GitHub (see below if it is not there yet).
 2. Go to https://vercel.com, sign in with GitHub, and **Add New → Project**.
 3. Pick the repo. Vercel detects Next.js on its own — leave the build settings alone.
-4. Before deploying, open **Environment Variables** and add the same two values:
+4. Before deploying, open **Environment Variables** and add the same three values:
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `SUPABASE_JWT_SECRET`
+
+   Vercel's Supabase integration sets the first two for you if you add it from the
+   dashboard; the JWT secret you may need to add by hand.
 5. **Deploy**. You get a URL like `doorknock-abc123.vercel.app`.
 6. Send that link to the crew. On a phone: open it, then *Share → Add to Home Screen* and it
    behaves like an installed app.
@@ -99,15 +110,31 @@ git push -u origin main
 ## How teams are separated
 
 There are no user accounts. Everyone types a **team code** and their **name** on the front
-page. The team code is what splits one crew's map from another's — the same code means the
-same map.
+page, and the team code is what splits one crew's map from another's.
 
-**This means the team code is effectively a shared password.** Anyone who knows it can read
-and change that team's data. Pick something nobody would guess (`summit-solar-2026`, not
-`solar`), and do not put it on a flyer. If you need real accounts and per-rep permissions,
-that is a Supabase Auth change on top of this — the tables are already there for it.
+That code is enforced by the database, not just the UI. When you enter it the app calls
+`/api/team-token`, which signs a short-lived JWT carrying a `team` claim using the project's
+JWT secret. Every read, write and live-update subscription carries that token, and the
+row-level security policies compare its claim to each row's `team_code`. A browser holding a
+token for one team cannot read, change or delete another team's rows — Postgres refuses.
 
----
+This matters because the Supabase anon key is baked into the public JavaScript bundle, so
+anyone who loads the site has it. Before the policies were tightened, that key alone was
+enough to list every team's data and delete it; that was demonstrated against the real
+database, not theorised. It is now enough to do nothing at all without a team token.
+
+**What this is not is authentication.** Anyone who knows a team code can still get a token
+for it, exactly as they could always have typed it into the app. What it removes is the
+ability to enumerate or destroy teams you cannot name. So:
+
+- **Pick a team code nobody would guess.** `summit-solar-fall26-9xk`, not `solar` or `1234`.
+  It is a shared password, and it is the only thing standing between a stranger and a file
+  of home addresses with notes about who is home when.
+- Codes are normalised to lowercase letters, numbers and dashes, so `Summit Solar!` and
+  `summit-solar` are the same team.
+
+If you outgrow that — per-rep logins, revoking one rep's access, an audit trail — the step up
+is Supabase Auth. The tables already carry everything it would need.
 
 ## Things worth knowing
 
@@ -129,24 +156,49 @@ that is a Supabase Auth change on top of this — the tables are already there f
 
 ```
 app/
-  page.tsx            screen state: modes, sheets, territory + house actions
-  layout.tsx          metadata, viewport, Leaflet + global CSS
-  globals.css         the whole design system
-  manifest.ts         home-screen install
+  page.tsx                    screen state: modes, sheets, territory + house actions
+  layout.tsx                  metadata, viewport, Leaflet + global CSS
+  globals.css                 the whole design system
+  manifest.ts                 home-screen install
+  api/team-token/route.ts     signs the per-team JWT (server-side; needs SUPABASE_JWT_SECRET)
 components/
-  MapView.tsx         Leaflet map, freehand drawing, status-coloured pins
-  Gate.tsx            team code + name
-  HouseSheet.tsx      mark a door, notes, address
-  TerritorySheet.tsx  territory list, progress, CSV export
+  MapView.tsx                 Leaflet map, freehand drawing, status-coloured pins
+  Gate.tsx                    team code + name
+  HouseSheet.tsx              mark a door, notes, address
+  TerritorySheet.tsx          territory list, progress, CSV export
   SaveTerritorySheet.tsx
 lib/
-  store.ts            data layer — Supabase with live sync, or browser storage
-  overpass.ts         pulls addresses out of OpenStreetMap
-  geo.ts              point-in-polygon, area, distance, lasso simplification
-  types.ts            statuses and their colours
-supabase-schema.sql   run this once in Supabase
+  store.ts                    data layer - Supabase with live sync, or browser storage
+  supabase.ts                 per-team client factory + token fetch
+  jwt.ts                      HS256 signer (server only)
+  overpass.ts                 pulls addresses out of OpenStreetMap
+  geo.ts                      point-in-polygon, area, distance, lasso simplification
+  types.ts                    statuses and their colours
+scripts/
+  run-sql.mjs                 apply a .sql file to the database
+  verify-supabase.mjs         19 checks against the live project - run after any schema change
+  verify-realtime.mjs         isolates realtime INSERT/UPDATE/DELETE behaviour
+  probe-jwt.mjs               checks custom JWTs are accepted on REST and realtime
+  peek-team.mjs               dump one team's rows
+  poke-team.mjs               edit a row as if from a second device, to test live sync
+migrations/                   incremental changes applied after the initial schema
+supabase-schema.sql           the full schema, safe to re-run
 ```
 
 Data flows one way: `useCanvassData` owns territories and houses, `page.tsx` renders them,
 and every mutation goes back through the hook so the optimistic update and the write to
 Supabase stay in one place.
+
+## Verifying it still works
+
+After any schema or data-layer change:
+
+```bash
+node scripts/verify-supabase.mjs
+```
+
+19 checks against the real project: inserts with client-generated ids, jsonb polygon
+round-tripping, chunked inserts past the 500-row boundary, realtime delivery of all three
+event types, and — the ones that matter most — that a client holding only the public anon key
+can neither enumerate nor delete another team's rows. It cleans up after itself and only ever
+touches team codes beginning `zz-verify`.

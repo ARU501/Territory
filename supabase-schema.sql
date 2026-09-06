@@ -1,8 +1,11 @@
 -- ---------------------------------------------------------------------------
 -- DoorKnock database setup
 --
--- Paste this whole file into the Supabase SQL Editor and hit Run. It is safe
--- to run more than once.
+-- Paste this whole file into the Supabase SQL Editor and hit Run, or apply it
+-- with:  node scripts/run-sql.mjs supabase-schema.sql
+--
+-- It is safe to run more than once. Every choice below was verified against a
+-- live Supabase project by scripts/verify-supabase.mjs, not assumed.
 -- ---------------------------------------------------------------------------
 
 create table if not exists public.territories (
@@ -35,24 +38,42 @@ create index if not exists houses_territory_idx on public.houses (territory_id);
 -- ---------------------------------------------------------------------------
 -- Access rules
 --
--- There are no user accounts: the team code typed on the front page is the
--- only thing separating one crew's map from another's. Anyone who learns a
--- team code can read and change that team's data, so treat the code the way
--- you would treat a shared password.
+-- The anon key is baked into the public JavaScript bundle, so row-level
+-- security is the only thing protecting this data. Blanket "using (true)"
+-- policies would let anyone who loaded the site read, alter and delete EVERY
+-- team's data without knowing a single team code — that was demonstrated
+-- against a real database before these policies were written.
+--
+-- Instead, each request must carry a JWT minted by /api/team-token whose
+-- `team` claim names one team, and Postgres compares it to the row.
+--
+-- This is scoping, not authentication. Anyone who knows a team code can still
+-- obtain a token for it, exactly as they could always have typed it into the
+-- app. What it removes is the ability to enumerate or destroy teams you cannot
+-- name. Choose team codes nobody would guess.
+--
+-- The failure mode is closed: with no token, auth.jwt() is null, the comparison
+-- yields null rather than true, and no row is visible.
 -- ---------------------------------------------------------------------------
 
 alter table public.territories enable row level security;
 alter table public.houses      enable row level security;
 
+-- Remove the permissive policies shipped by earlier versions of this file.
 drop policy if exists "territories open access" on public.territories;
-create policy "territories open access"
-  on public.territories for all
-  using (true) with check (true);
+drop policy if exists "houses open access"      on public.houses;
 
-drop policy if exists "houses open access" on public.houses;
-create policy "houses open access"
+drop policy if exists "territories scoped to team token" on public.territories;
+create policy "territories scoped to team token"
+  on public.territories for all
+  using      (team_code = (auth.jwt() ->> 'team'))
+  with check (team_code = (auth.jwt() ->> 'team'));
+
+drop policy if exists "houses scoped to team token" on public.houses;
+create policy "houses scoped to team token"
   on public.houses for all
-  using (true) with check (true);
+  using      (team_code = (auth.jwt() ->> 'team'))
+  with check (team_code = (auth.jwt() ->> 'team'));
 
 -- ---------------------------------------------------------------------------
 -- Live updates: without this, teammates only see each other's work on reload.
@@ -69,3 +90,16 @@ begin
   exception when duplicate_object then null;
   end;
 end $$;
+
+-- Under the default replica identity a DELETE writes only the primary key to
+-- the WAL. Realtime evaluates both the subscription filter and RLS against that
+-- old record, so a subscription filtered on team_code can never match a delete
+-- and the event is dropped: one rep deletes a territory and everyone else keeps
+-- seeing the stale pins until they reload. FULL puts the whole old row in the
+-- WAL, which is what makes deletions propagate.
+alter table public.territories replica identity full;
+alter table public.houses      replica identity full;
+
+-- PostgREST caches the schema; tell it to re-read so the tables are visible
+-- over the REST API immediately rather than after its next refresh.
+notify pgrst, 'reload schema';

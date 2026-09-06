@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { supabase, isCloudMode } from "./supabase";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { createTeamClient, fetchTeamToken, isCloudMode } from "./supabase";
 import { slugifyTeam } from "./team";
 import type { House, LatLng, Status, Territory } from "./types";
 
@@ -53,16 +54,33 @@ export interface NewHouse {
   status?: Status;
 }
 
-export function useCanvassData(team: string, rep: string) {
+export function useCanvassData(
+  team: string,
+  rep: string,
+  onWriteError?: (message: string) => void
+) {
   const [territories, setTerritories] = useState<Territory[]>([]);
   const [houses, setHouses] = useState<House[]>([]);
   const [loading, setLoading] = useState(true);
   const [sync, setSync] = useState<SyncState>(isCloudMode ? "connecting" : "solo");
   const [error, setError] = useState<string | null>(null);
 
+  // The client is pinned to one team by a signed token, so it is rebuilt
+  // whenever the team changes rather than living as a module singleton.
+  const [client, setClient] = useState<SupabaseClient | null>(null);
+
   const teamCode = slugifyTeam(team);
   const stateRef = useRef<SoloData>({ territories: [], houses: [] });
+  const clientRef = useRef<SupabaseClient | null>(null);
+  const errorSinkRef = useRef(onWriteError);
+
   stateRef.current = { territories, houses };
+  clientRef.current = client;
+  errorSinkRef.current = onWriteError;
+
+  const report = useCallback((message: string) => {
+    errorSinkRef.current?.(message);
+  }, []);
 
   const persistSolo = useCallback(
     (next: Partial<SoloData>) => {
@@ -71,6 +89,39 @@ export function useCanvassData(team: string, rep: string) {
     },
     [teamCode]
   );
+
+  // ---- token + client -----------------------------------------------------
+  useEffect(() => {
+    if (!isCloudMode || !teamCode) {
+      setClient(null);
+      return;
+    }
+
+    let cancelled = false;
+    const controller = new AbortController();
+
+    setSync("connecting");
+    fetchTeamToken(teamCode, controller.signal)
+      .then(({ token }) => {
+        if (cancelled) return;
+        setClient(createTeamClient(token));
+      })
+      .catch((err: unknown) => {
+        if (cancelled || controller.signal.aborted) return;
+        setError(
+          err instanceof Error
+            ? `Could not start a session for this team: ${err.message}`
+            : "Could not start a session for this team."
+        );
+        setSync("error");
+        setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [teamCode]);
 
   // ---- initial load -------------------------------------------------------
   useEffect(() => {
@@ -81,7 +132,7 @@ export function useCanvassData(team: string, rep: string) {
       setLoading(true);
       setError(null);
 
-      if (!supabase) {
+      if (!isCloudMode) {
         const data = readSolo(teamCode);
         if (cancelled) return;
         setTerritories(data.territories);
@@ -91,9 +142,11 @@ export function useCanvassData(team: string, rep: string) {
         return;
       }
 
+      if (!client) return; // waiting on the team token
+
       const [t, h] = await Promise.all([
-        supabase.from("territories").select("*").eq("team_code", teamCode),
-        supabase.from("houses").select("*").eq("team_code", teamCode),
+        client.from("territories").select("*").eq("team_code", teamCode),
+        client.from("houses").select("*").eq("team_code", teamCode),
       ]);
 
       if (cancelled) return;
@@ -117,12 +170,11 @@ export function useCanvassData(team: string, rep: string) {
     return () => {
       cancelled = true;
     };
-  }, [teamCode]);
+  }, [teamCode, client]);
 
   // ---- live sync ----------------------------------------------------------
   useEffect(() => {
-    if (!supabase || !teamCode) return;
-    const client = supabase;
+    if (!client || !teamCode) return;
 
     const upsert = <T extends { id: string }>(list: T[], row: T) => {
       const idx = list.findIndex((x) => x.id === row.id);
@@ -139,8 +191,8 @@ export function useCanvassData(team: string, rep: string) {
         { event: "*", schema: "public", table: "houses", filter: `team_code=eq.${teamCode}` },
         (payload) => {
           if (payload.eventType === "DELETE") {
-            const gone = payload.old as { id: string };
-            setHouses((prev) => prev.filter((x) => x.id !== gone.id));
+            const gone = payload.old as { id?: string };
+            if (gone?.id) setHouses((prev) => prev.filter((x) => x.id !== gone.id));
           } else {
             setHouses((prev) => upsert(prev, payload.new as House));
           }
@@ -151,8 +203,8 @@ export function useCanvassData(team: string, rep: string) {
         { event: "*", schema: "public", table: "territories", filter: `team_code=eq.${teamCode}` },
         (payload) => {
           if (payload.eventType === "DELETE") {
-            const gone = payload.old as { id: string };
-            setTerritories((prev) => prev.filter((x) => x.id !== gone.id));
+            const gone = payload.old as { id?: string };
+            if (gone?.id) setTerritories((prev) => prev.filter((x) => x.id !== gone.id));
           } else {
             setTerritories((prev) => upsert(prev, payload.new as Territory));
           }
@@ -166,7 +218,7 @@ export function useCanvassData(team: string, rep: string) {
     return () => {
       client.removeChannel(channel);
     };
-  }, [teamCode]);
+  }, [client, teamCode]);
 
   // ---- cross-tab sync in solo mode ---------------------------------------
   useEffect(() => {
@@ -196,8 +248,13 @@ export function useCanvassData(team: string, rep: string) {
       setTerritories((prev) => [...prev, row]);
       persistSolo({ territories: [...stateRef.current.territories, row] });
 
-      if (supabase) {
-        const { error: err } = await supabase.from("territories").insert(row);
+      const db = clientRef.current;
+      if (isCloudMode) {
+        if (!db) {
+          setTerritories((prev) => prev.filter((t) => t.id !== row.id));
+          throw new Error("Still connecting to the team database. Try again in a moment.");
+        }
+        const { error: err } = await db.from("territories").insert(row);
         if (err) {
           setTerritories((prev) => prev.filter((t) => t.id !== row.id));
           throw new Error(err.message);
@@ -214,24 +271,39 @@ export function useCanvassData(team: string, rep: string) {
       persistSolo({
         territories: stateRef.current.territories.map((t) => (t.id === id ? { ...t, name } : t)),
       });
-      if (supabase) await supabase.from("territories").update({ name }).eq("id", id);
+      const db = clientRef.current;
+      if (db) {
+        const { error: err } = await db.from("territories").update({ name }).eq("id", id);
+        if (err) report(`Renaming that area did not save: ${err.message}`);
+      }
     },
-    [persistSolo]
+    [persistSolo, report]
   );
 
   const deleteTerritory = useCallback(
     async (id: string) => {
+      const doomed = stateRef.current.territories.find((t) => t.id === id);
       const nextTerritories = stateRef.current.territories.filter((t) => t.id !== id);
       const nextHouses = stateRef.current.houses.filter((h) => h.territory_id !== id);
       setTerritories(nextTerritories);
       setHouses(nextHouses);
       persistSolo({ territories: nextTerritories, houses: nextHouses });
-      if (supabase) {
-        await supabase.from("houses").delete().eq("territory_id", id);
-        await supabase.from("territories").delete().eq("id", id);
+
+      const db = clientRef.current;
+      if (db) {
+        // The foreign key cascades, but deleting the houses first keeps the
+        // realtime events explicit so teammates drop the pins immediately.
+        const houseDelete = await db.from("houses").delete().eq("territory_id", id);
+        const terrDelete = await db.from("territories").delete().eq("id", id);
+        const err = houseDelete.error ?? terrDelete.error;
+        if (err) {
+          report(
+            `Deleting ${doomed?.name ?? "that area"} did not save: ${err.message}. It will come back on reload.`
+          );
+        }
       }
     },
-    [persistSolo]
+    [persistSolo, report]
   );
 
   const addHouses = useCallback(
@@ -254,11 +326,29 @@ export function useCanvassData(team: string, rep: string) {
       setHouses((prev) => [...prev, ...rows]);
       persistSolo({ houses: [...stateRef.current.houses, ...rows] });
 
-      if (supabase) {
+      const db = clientRef.current;
+      if (isCloudMode) {
+        if (!db) {
+          setHouses((prev) => prev.filter((h) => !rows.some((r) => r.id === h.id)));
+          throw new Error("Still connecting to the team database. Try again in a moment.");
+        }
         // Chunked so a big territory does not blow past the request size limit.
+        let saved = 0;
         for (let i = 0; i < rows.length; i += 500) {
-          const { error: err } = await supabase.from("houses").insert(rows.slice(i, i + 500));
-          if (err) throw new Error(err.message);
+          const chunk = rows.slice(i, i + 500);
+          const { error: err } = await db.from("houses").insert(chunk);
+          if (err) {
+            // Roll the unsaved tail back out of local state so the map matches
+            // the database instead of showing pins nobody else can see.
+            const unsaved = new Set(rows.slice(saved).map((r) => r.id));
+            setHouses((prev) => prev.filter((h) => !unsaved.has(h.id)));
+            throw new Error(
+              saved > 0
+                ? `Saved ${saved} of ${rows.length} houses, then failed: ${err.message}`
+                : err.message
+            );
+          }
+          saved += chunk.length;
         }
       }
       return rows;
@@ -272,19 +362,38 @@ export function useCanvassData(team: string, rep: string) {
       const apply = (list: House[]) => list.map((h) => (h.id === id ? { ...h, ...full } : h));
       setHouses(apply);
       persistSolo({ houses: apply(stateRef.current.houses) });
-      if (supabase) await supabase.from("houses").update(full).eq("id", id);
+
+      const db = clientRef.current;
+      if (db) {
+        const { error: err } = await db.from("houses").update(full).eq("id", id);
+        if (err) {
+          const address =
+            stateRef.current.houses.find((h) => h.id === id)?.address || "that house";
+          report(`${address} did not save: ${err.message}. Mark it again when you have signal.`);
+        }
+      }
     },
-    [rep, persistSolo]
+    [rep, persistSolo, report]
   );
 
   const deleteHouse = useCallback(
     async (id: string) => {
+      const doomed = stateRef.current.houses.find((h) => h.id === id);
       const next = stateRef.current.houses.filter((h) => h.id !== id);
       setHouses(next);
       persistSolo({ houses: next });
-      if (supabase) await supabase.from("houses").delete().eq("id", id);
+
+      const db = clientRef.current;
+      if (db) {
+        const { error: err } = await db.from("houses").delete().eq("id", id);
+        if (err) {
+          report(
+            `Deleting ${doomed?.address ?? "that house"} did not save: ${err.message}. It will come back on reload.`
+          );
+        }
+      }
     },
-    [persistSolo]
+    [persistSolo, report]
   );
 
   const housesByTerritory = useMemo(() => {
