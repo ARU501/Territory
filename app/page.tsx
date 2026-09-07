@@ -7,6 +7,7 @@ import Gate from "@/components/Gate";
 import HouseSheet from "@/components/HouseSheet";
 import SaveTerritorySheet from "@/components/SaveTerritorySheet";
 import TerritorySheet from "@/components/TerritorySheet";
+import LocationSheet, { type LocationSheetMode } from "@/components/LocationSheet";
 import {
   IconCheck,
   IconDoor,
@@ -22,6 +23,7 @@ import type { Basemap, MapHandle, MapMode } from "@/components/MapView";
 
 import { useCanvassData } from "@/lib/store";
 import { useWakeLock } from "@/lib/useWakeLock";
+import { getPermissionState } from "@/lib/geolocation";
 import { isCloudMode } from "@/lib/supabase";
 import { distanceM, pointInPolygon, simplify } from "@/lib/geo";
 import { fetchHousesInPolygon } from "@/lib/overpass";
@@ -61,6 +63,7 @@ export default function Page() {
   const [selectedHouseId, setSelectedHouseId] = useState<string | null>(null);
   const [showTerritories, setShowTerritories] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  const [locationSheet, setLocationSheet] = useState<LocationSheetMode | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const mapRef = useRef<MapHandle | null>(null);
@@ -141,6 +144,26 @@ export default function Page() {
     setShowGate(false);
     setActiveTerritoryId(null);
     setSelectedHouseId(null);
+  }, []);
+
+  /**
+   * Tapping Find me asks the browser what it already knows before doing
+   * anything. If location was refused, the native dialog will never appear
+   * again, so showing recovery steps is the only useful response. If it has
+   * never been asked, explain why first — a prompt that arrives unexplained is
+   * the reason people decline in the first place.
+   */
+  const handleLocate = useCallback(async () => {
+    const state = await getPermissionState();
+    if (state === "denied") {
+      setLocationSheet("blocked");
+      return;
+    }
+    if (state === "prompt") {
+      setLocationSheet("explain");
+      return;
+    }
+    mapRef.current?.locate();
   }, []);
 
   const toggleBasemap = useCallback(() => {
@@ -428,7 +451,11 @@ export default function Page() {
           onHouseClick={(h) => setSelectedHouseId(h.id)}
           onMapTap={handleMapTap}
           onTerritoryClick={(id) => setActiveTerritoryId(id)}
-          onLocationError={(m) => pushToast(m, "err")}
+          onLocationError={(kind, message) => {
+            // A refusal needs instructions, not a toast that scrolls away.
+            if (kind === "denied") setLocationSheet("blocked");
+            else pushToast(message, "err");
+          }}
         />
 
         {/* active territory summary */}
@@ -516,7 +543,7 @@ export default function Page() {
             </button>
             <button
               className="fab"
-              onClick={() => mapRef.current?.locate()}
+              onClick={handleLocate}
               title="Find me"
               aria-label="Find me"
             >
@@ -620,6 +647,17 @@ export default function Page() {
           }}
           onStartDrawing={startDrawing}
           onExport={exportCsv}
+        />
+      )}
+
+      {locationSheet && (
+        <LocationSheet
+          mode={locationSheet}
+          onClose={() => setLocationSheet(null)}
+          onContinue={() => {
+            setLocationSheet(null);
+            mapRef.current?.locate();
+          }}
         />
       )}
 

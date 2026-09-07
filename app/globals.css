@@ -775,6 +775,60 @@ input.field {
   place-items: center;
 }
 
+/* ---------- location permission sheet ---------- */
+
+.loc-hero {
+  width: 56px;
+  height: 56px;
+  margin: 4px auto 14px;
+  border-radius: 16px;
+  display: grid;
+  place-items: center;
+  background: #eff6ff;
+  color: var(--brand);
+}
+
+.loc-copy {
+  font-size: 14.5px;
+  line-height: 1.55;
+  color: var(--ink-3);
+  margin: 10px 0;
+}
+
+.loc-route {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-top: 10px;
+  background: var(--paper-2);
+}
+
+.loc-route-title {
+  font-weight: 700;
+  font-size: 14px;
+  margin-bottom: 6px;
+}
+
+.loc-steps {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink-3);
+}
+
+.loc-steps li {
+  margin: 3px 0;
+}
+
+.loc-footnote {
+  font-size: 12.5px;
+  color: var(--muted);
+  line-height: 1.5;
+  margin-top: 12px;
+  text-align: center;
+}
+
 /* ---------- toast ---------- */
 
 .toast-wrap {

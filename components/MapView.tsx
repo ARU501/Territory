@@ -4,6 +4,12 @@ import { useEffect, useImperativeHandle, useRef, type MutableRefObject } from "r
 import L from "leaflet";
 import type { House, LatLng, Territory } from "@/lib/types";
 import { STATUS_MAP } from "@/lib/types";
+import {
+  describeLocationError,
+  getPermissionState,
+  getPosition,
+  type LocationFailure,
+} from "@/lib/geolocation";
 
 export type MapMode = "idle" | "draw" | "add";
 export type Basemap = "street" | "satellite";
@@ -33,7 +39,7 @@ interface MapViewProps {
   onHouseClick: (house: House) => void;
   onMapTap: (point: LatLng) => void;
   onTerritoryClick: (id: string) => void;
-  onLocationError: (message: string) => void;
+  onLocationError: (kind: LocationFailure, message: string) => void;
 }
 
 const TILES: Record<Basemap, { url: string; attribution: string; maxZoom: number }> = {
@@ -157,8 +163,17 @@ export default function MapView(props: MapViewProps) {
     // has to check that its map still exists before touching it.
     let disposed = false;
 
-    // Start on the rep's own location if the browser will give it up.
-    if (typeof navigator !== "undefined" && navigator.geolocation) {
+    // Re-centre on the rep ONLY if they have already granted permission.
+    //
+    // This used to call getCurrentPosition unconditionally, which fired the
+    // native permission dialog the instant the map loaded — before the rep had
+    // done anything or been told why it was being asked. People decline a
+    // dialog like that by reflex, and both iOS and Android then remember the
+    // refusal and stop prompting, so "Find me" failed forever afterwards.
+    // Checking the Permissions API never prompts, so an undecided or blocked
+    // browser is left alone until the rep deliberately taps Find me.
+    getPermissionState().then((state) => {
+      if (disposed || state !== "granted" || hasCenteredRef.current) return;
       navigator.geolocation.getCurrentPosition(
         (pos) => {
           if (disposed || hasCenteredRef.current) return;
@@ -166,11 +181,11 @@ export default function MapView(props: MapViewProps) {
           map.setView([pos.coords.latitude, pos.coords.longitude], 17);
         },
         () => {
-          /* denied or unavailable - the US-wide default view stands */
+          /* already granted but no fix - the default view stands */
         },
         { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }
       );
-    }
+    });
 
     // Leaflet mis-sizes itself when it initialises inside a flex layout.
     const sizeTimer = window.setTimeout(() => {
@@ -434,8 +449,8 @@ export default function MapView(props: MapViewProps) {
       const map = mapRef.current;
       const layer = meLayerRef.current;
       if (!map || !layer) return;
-      if (!navigator.geolocation) {
-        propsRef.current.onLocationError("This browser cannot share a location.");
+      if (typeof navigator === "undefined" || !navigator.geolocation) {
+        propsRef.current.onLocationError("unsupported", "This browser cannot share a location.");
         return;
       }
 
@@ -466,7 +481,9 @@ export default function MapView(props: MapViewProps) {
         }
       };
 
-      navigator.geolocation.getCurrentPosition(
+      // getPosition tries a precise fix first and falls back to a coarse one,
+      // so a slow cold GPS lock outdoors is not reported as a failure.
+      getPosition().then(
         (pos) => {
           draw(pos, true);
           if (watchIdRef.current === null) {
@@ -477,14 +494,10 @@ export default function MapView(props: MapViewProps) {
             );
           }
         },
-        (err) => {
-          propsRef.current.onLocationError(
-            err.code === err.PERMISSION_DENIED
-              ? "Location is blocked. Allow it in your browser settings to see yourself on the map."
-              : "Could not get a location fix right now."
-          );
-        },
-        { enableHighAccuracy: true, timeout: 10000 }
+        (err: GeolocationPositionError) => {
+          const { kind, message } = describeLocationError(err);
+          propsRef.current.onLocationError(kind, message);
+        }
       );
     },
     undoDrawPoint() {
