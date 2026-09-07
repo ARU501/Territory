@@ -23,7 +23,14 @@ import type { Basemap, MapHandle, MapMode } from "@/components/MapView";
 
 import { useCanvassData } from "@/lib/store";
 import { useWakeLock } from "@/lib/useWakeLock";
-import { getPermissionState } from "@/lib/geolocation";
+import {
+  clearDenied,
+  getPermissionState,
+  hasBeenAsked,
+  rememberAsked,
+  rememberDenied,
+  wasDenied,
+} from "@/lib/geolocation";
 import { isCloudMode } from "@/lib/supabase";
 import { distanceM, pointInPolygon, simplify } from "@/lib/geo";
 import { fetchHousesInPolygon } from "@/lib/overpass";
@@ -155,14 +162,29 @@ export default function Page() {
    */
   const handleLocate = useCallback(async () => {
     const state = await getPermissionState();
-    if (state === "denied") {
+
+    // Granted is the one answer every browser reports honestly.
+    if (state === "granted") {
+      clearDenied();
+      mapRef.current?.locate();
+      return;
+    }
+
+    // Our own record of a real refusal outranks the API, because iOS Safari
+    // reports "prompt" even when the site is set to Deny.
+    if (state === "denied" || wasDenied()) {
       setLocationSheet("blocked");
       return;
     }
-    if (state === "prompt") {
+
+    // Never asked on this device: explain before the dialog appears.
+    if (!hasBeenAsked()) {
       setLocationSheet("explain");
       return;
     }
+
+    // Asked before, no refusal recorded — just try. If it was in fact refused,
+    // the error path records it and shows the recovery steps.
     mapRef.current?.locate();
   }, []);
 
@@ -452,10 +474,16 @@ export default function Page() {
           onMapTap={handleMapTap}
           onTerritoryClick={(id) => setActiveTerritoryId(id)}
           onLocationError={(kind, message) => {
-            // A refusal needs instructions, not a toast that scrolls away.
-            if (kind === "denied") setLocationSheet("blocked");
-            else pushToast(message, "err");
+            // A real refusal is the only trustworthy signal on iOS, so record
+            // it; a refusal needs instructions, not a toast that scrolls away.
+            if (kind === "denied") {
+              rememberDenied();
+              setLocationSheet("blocked");
+            } else {
+              pushToast(message, "err");
+            }
           }}
+          onLocationFound={clearDenied}
         />
 
         {/* active territory summary */}
@@ -656,8 +684,10 @@ export default function Page() {
           onClose={() => setLocationSheet(null)}
           onContinue={() => {
             setLocationSheet(null);
+            rememberAsked();
             mapRef.current?.locate();
           }}
+          onAlreadyAllowed={() => setLocationSheet("blocked")}
         />
       )}
 

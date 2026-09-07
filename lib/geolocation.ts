@@ -14,6 +14,47 @@ export type LocationFailure = "denied" | "unavailable" | "timeout" | "unsupporte
  * Not every mobile browser implements it, so "unsupported" is a real answer and
  * callers must treat it like "prompt" rather than assuming the worst.
  */
+const DENIED_KEY = "doorknock:geo-denied";
+const ASKED_KEY = "doorknock:geo-asked";
+
+/**
+ * iOS Safari does not report a geolocation refusal.
+ *
+ * With the site's Location setting explicitly set to Deny, Safari still returns
+ * state "prompt" from the Permissions API, while getCurrentPosition fails
+ * immediately with PERMISSION_DENIED and shows no dialog. So on the device most
+ * of the crew actually uses, the browser's own answer cannot distinguish "never
+ * asked" from "refused, and never asking again".
+ *
+ * The only reliable signal is a real PERMISSION_DENIED from getCurrentPosition,
+ * so the app records that itself and trusts its own memory over the API. Cleared
+ * as soon as a fix succeeds, so re-allowing it in Settings recovers on its own.
+ */
+function readFlag(key: string): boolean {
+  try {
+    return localStorage.getItem(key) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeFlag(key: string, on: boolean) {
+  try {
+    if (on) localStorage.setItem(key, "1");
+    else localStorage.removeItem(key);
+  } catch {
+    /* private mode - we just lose the memory this session */
+  }
+}
+
+export const wasDenied = () => readFlag(DENIED_KEY);
+export const rememberDenied = () => writeFlag(DENIED_KEY, true);
+export const clearDenied = () => writeFlag(DENIED_KEY, false);
+
+/** Whether a native dialog has ever been triggered on this device. */
+export const hasBeenAsked = () => readFlag(ASKED_KEY);
+export const rememberAsked = () => writeFlag(ASKED_KEY, true);
+
 export async function getPermissionState(): Promise<PermissionState> {
   if (typeof navigator === "undefined" || !navigator.geolocation) return "unsupported";
   if (!navigator.permissions?.query) return "unsupported";

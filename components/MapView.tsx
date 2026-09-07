@@ -40,6 +40,8 @@ interface MapViewProps {
   onMapTap: (point: LatLng) => void;
   onTerritoryClick: (id: string) => void;
   onLocationError: (kind: LocationFailure, message: string) => void;
+  /** A real fix arrived, so any remembered refusal is stale. */
+  onLocationFound: () => void;
 }
 
 const TILES: Record<Basemap, { url: string; attribution: string; maxZoom: number }> = {
@@ -485,6 +487,7 @@ export default function MapView(props: MapViewProps) {
       // so a slow cold GPS lock outdoors is not reported as a failure.
       getPosition().then(
         (pos) => {
+          propsRef.current.onLocationFound();
           draw(pos, true);
           if (watchIdRef.current === null) {
             watchIdRef.current = navigator.geolocation.watchPosition(

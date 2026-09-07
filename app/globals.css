@@ -821,6 +821,18 @@ input.field {
   margin: 3px 0;
 }
 
+.loc-link {
+  display: block;
+  width: 100%;
+  margin-top: 14px;
+  padding: 8px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--brand);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .loc-footnote {
   font-size: 12.5px;
   color: var(--muted);

@@ -10,6 +10,8 @@ interface LocationSheetProps {
   onClose: () => void;
   /** Triggers the real browser prompt (explain), or retries the fix (blocked). */
   onContinue: () => void;
+  /** Escape hatch from the explainer straight to the recovery steps. */
+  onAlreadyAllowed?: () => void;
 }
 
 interface Device {
@@ -126,7 +128,12 @@ function routesFor(device: Device): Route[] {
   ];
 }
 
-export default function LocationSheet({ mode, onClose, onContinue }: LocationSheetProps) {
+export default function LocationSheet({
+  mode,
+  onClose,
+  onContinue,
+  onAlreadyAllowed,
+}: LocationSheetProps) {
   const device = detectDevice();
 
   if (mode === "explain") {
@@ -144,8 +151,8 @@ export default function LocationSheet({ mode, onClose, onContinue }: LocationShe
           to your team&apos;s map or shared with anyone.
         </p>
         <p className="loc-copy">
-          Your phone will ask next. Tap <strong>Allow</strong> — if you tap don&apos;t allow, it
-          stops asking and you have to turn it back on in Settings.
+          If your phone asks, tap <strong>Allow</strong>. Tapping don&apos;t allow stops it asking
+          again, and it then has to be switched back on in your settings.
         </p>
         <button className="btn btn-primary btn-block" onClick={onContinue} style={{ marginTop: 6 }}>
           Continue
@@ -153,6 +160,11 @@ export default function LocationSheet({ mode, onClose, onContinue }: LocationShe
         <button className="btn btn-quiet btn-block" onClick={onClose} style={{ marginTop: 8 }}>
           Not now
         </button>
+        {onAlreadyAllowed && (
+          <button className="loc-link" onClick={onAlreadyAllowed}>
+            Nothing happens when I tap Continue
+          </button>
+        )}
       </Sheet>
     );
   }
