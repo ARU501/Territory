@@ -50,8 +50,7 @@ const token = `${head}.${body}.${b64url(
 )}`;
 
 const db = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY, {
-  global: { headers: { Authorization: `Bearer ${token}` } },
-  auth: { persistSession: false, autoRefreshToken: false },
+  accessToken: async () => token,
 });
 
 const t = await db.from("territories").select("*").eq("team_code", team);

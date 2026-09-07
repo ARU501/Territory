@@ -24,14 +24,16 @@ export function createTeamClient(token: string): SupabaseClient {
     throw new Error("createTeamClient called without Supabase env vars configured.");
   }
 
-  const client = createClient(url, anonKey, {
-    global: { headers: { Authorization: `Bearer ${token}` } },
-    auth: { persistSession: false, autoRefreshToken: false },
+  // `accessToken` is supabase-js's hook for third-party auth: it applies the
+  // token to PostgREST *and* to the realtime socket, and disables the built-in
+  // auth namespace. Setting global.headers.Authorization by hand is not enough
+  // — the client overrides that header per request with its own session token,
+  // which falls back to the anon key, and every query then returns zero rows
+  // because the policies see no team claim and silently filter everything out.
+  return createClient(url, anonKey, {
+    accessToken: async () => token,
     realtime: { params: { eventsPerSecond: 20 } },
   });
-
-  client.realtime.setAuth(token);
-  return client;
 }
 
 export interface TeamCredentials {

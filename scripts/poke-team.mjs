@@ -27,8 +27,7 @@ const body = b64url(JSON.stringify({ iss: "supabase", role: "anon", aud: "authen
 const token = `${head}.${body}.${b64url(createHmac("sha256", env.SUPABASE_JWT_SECRET).update(`${head}.${body}`).digest())}`;
 
 const db = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY, {
-  global: { headers: { Authorization: `Bearer ${token}` } },
-  auth: { persistSession: false, autoRefreshToken: false },
+  accessToken: async () => token,
 });
 
 const { data } = await db.from("houses").select("id,address").eq("team_code", team).limit(1);

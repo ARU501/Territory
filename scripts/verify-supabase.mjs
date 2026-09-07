@@ -89,13 +89,12 @@ function clientFor(team) {
   if (!team) return createClient(URL_, KEY, { realtime: { params: { eventsPerSecond: 10 } } });
 
   const token = signTeamToken(team);
-  const c = createClient(URL_, KEY, {
-    global: { headers: { Authorization: `Bearer ${token}` } },
-    auth: { persistSession: false, autoRefreshToken: false },
+  // Mirrors lib/supabase.ts exactly: the accessToken hook, not a hand-set
+  // Authorization header, which supabase-js overrides per request.
+  return createClient(URL_, KEY, {
+    accessToken: async () => token,
     realtime: { params: { eventsPerSecond: 20 } },
   });
-  c.realtime.setAuth(token);
-  return c;
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
