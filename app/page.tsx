@@ -79,11 +79,21 @@ export default function Page() {
 
   // ---- restore session ----------------------------------------------------
   useEffect(() => {
-    const savedTeam = localStorage.getItem(TEAM_KEY) ?? "";
-    const savedRep = localStorage.getItem(REP_KEY) ?? "";
-    const savedBasemap = localStorage.getItem(BASEMAP_KEY) as Basemap | null;
-    if (savedBasemap === "satellite" || savedBasemap === "street") setBasemap(savedBasemap);
-    setActiveTerritoryId(localStorage.getItem(ACTIVE_KEY));
+    // Accessing localStorage throws outright when site data is blocked (Safari
+    // private mode, locked-down enterprise phones). Unguarded, that leaves the
+    // rep staring at a permanently blank screen with no way forward.
+    let savedTeam = "";
+    let savedRep = "";
+    try {
+      savedTeam = localStorage.getItem(TEAM_KEY) ?? "";
+      savedRep = localStorage.getItem(REP_KEY) ?? "";
+      const savedBasemap = localStorage.getItem(BASEMAP_KEY) as Basemap | null;
+      if (savedBasemap === "satellite" || savedBasemap === "street") setBasemap(savedBasemap);
+      setActiveTerritoryId(localStorage.getItem(ACTIVE_KEY));
+    } catch {
+      /* no stored session available; fall through to the gate */
+    }
+
     if (savedTeam && savedRep) {
       setTeam(savedTeam);
       setRep(savedRep);
@@ -101,8 +111,12 @@ export default function Page() {
   // deleted the area while this device was away.
   useEffect(() => {
     if (!ready) return;
-    if (activeTerritoryId) localStorage.setItem(ACTIVE_KEY, activeTerritoryId);
-    else localStorage.removeItem(ACTIVE_KEY);
+    try {
+      if (activeTerritoryId) localStorage.setItem(ACTIVE_KEY, activeTerritoryId);
+      else localStorage.removeItem(ACTIVE_KEY);
+    } catch {
+      /* preference simply will not stick */
+    }
   }, [ready, activeTerritoryId]);
 
   useEffect(() => {
@@ -111,8 +125,12 @@ export default function Page() {
   }, [data.loading, data.territories, activeTerritoryId]);
 
   const enter = useCallback((nextTeam: string, nextRep: string) => {
-    localStorage.setItem(TEAM_KEY, nextTeam);
-    localStorage.setItem(REP_KEY, nextRep);
+    try {
+      localStorage.setItem(TEAM_KEY, nextTeam);
+      localStorage.setItem(REP_KEY, nextRep);
+    } catch {
+      /* the session just will not survive a reload on this device */
+    }
     setTeam(nextTeam);
     setRep(nextRep);
     setShowGate(false);
@@ -123,7 +141,11 @@ export default function Page() {
   const toggleBasemap = useCallback(() => {
     setBasemap((prev) => {
       const next = prev === "street" ? "satellite" : "street";
-      localStorage.setItem(BASEMAP_KEY, next);
+      try {
+        localStorage.setItem(BASEMAP_KEY, next);
+      } catch {
+        /* preference simply will not stick */
+      }
       return next;
     });
   }, []);

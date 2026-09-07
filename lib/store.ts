@@ -72,6 +72,36 @@ function queueWrite(team: string, write: PendingWrite): number {
   return queue.length;
 }
 
+/**
+ * Reads an entire team's table, a page at a time.
+ *
+ * Supabase caps rows per request (1000 by default) and does NOT report the cap
+ * as an error — the query simply returns fewer rows than exist. A crew with
+ * seven or eight loaded blocks passes 1000 houses easily, and without paging
+ * the extras just vanish off the map with nothing on screen to explain it.
+ */
+const PAGE_SIZE = 1000;
+
+async function fetchAllForTeam<T>(
+  client: SupabaseClient,
+  table: "territories" | "houses",
+  teamCode: string
+): Promise<{ rows: T[]; error: string | null }> {
+  const rows: T[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await client
+      .from(table)
+      .select("*")
+      .eq("team_code", teamCode)
+      .order("id", { ascending: true })
+      .range(from, from + PAGE_SIZE - 1);
+
+    if (error) return { rows, error: error.message };
+    rows.push(...((data ?? []) as T[]));
+    if (!data || data.length < PAGE_SIZE) return { rows, error: null };
+  }
+}
+
 function newId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -191,16 +221,15 @@ export function useCanvassData(
       if (!client) return; // waiting on the team token
 
       const [t, h] = await Promise.all([
-        client.from("territories").select("*").eq("team_code", teamCode),
-        client.from("houses").select("*").eq("team_code", teamCode),
+        fetchAllForTeam<Territory>(client, "territories", teamCode),
+        fetchAllForTeam<House>(client, "houses", teamCode),
       ]);
 
       if (cancelled) return;
 
       if (t.error || h.error) {
         setError(
-          (t.error ?? h.error)?.message ??
-            "Could not load this team's data. Check the Supabase setup."
+          t.error ?? h.error ?? "Could not load this team's data. Check the Supabase setup."
         );
         setSync("error");
         setLoading(false);
@@ -211,11 +240,11 @@ export function useCanvassData(
       // or a reload would quietly undo the rep's last stretch of work.
       const queued = readPending(teamCode);
       const byId = new Map(queued.map((p) => [p.id, p]));
-      const serverHouses = ((h.data ?? []) as House[]).map((row) =>
+      const serverHouses = h.rows.map((row) =>
         byId.has(row.id) ? { ...row, ...byId.get(row.id)!.patch } : row
       );
 
-      setTerritories((t.data ?? []) as Territory[]);
+      setTerritories(t.rows);
       setHouses(serverHouses);
       setPendingCount(queued.length);
       setLoading(false);
