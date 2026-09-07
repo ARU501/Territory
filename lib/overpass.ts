@@ -7,10 +7,18 @@ export interface FoundHouse {
   address: string;
 }
 
+/**
+ * Mirrors must serve WORLDWIDE data. overpass.osm.ch was previously listed here
+ * and is a Switzerland-only instance: for a US bounding box it answers HTTP 200
+ * with zero elements. Because that is indistinguishable from a genuinely empty
+ * area, a rep in Utah whose first two mirrors were busy would be told
+ * "OpenStreetMap has no mapped buildings in that area" for a fully mapped
+ * street. Verified by querying all four with the same Davis County box.
+ */
 const ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
-  "https://overpass.osm.ch/api/interpreter",
+  "https://overpass.private.coffee/api/interpreter",
 ];
 
 interface OverpassElement {

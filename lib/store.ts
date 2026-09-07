@@ -158,13 +158,41 @@ export function useCanvassData(
    * fail for an hour, and if the browser evicts the tab before they land the
    * work is gone. The mirror plus the pending queue below mean a reload shows
    * what they actually marked, not what the server last heard about.
+   *
+   * Debounced, because a real territory is large. The Davis County 5212 import
+   * is 11,817 houses, about 2.7 MB of JSON; serialising that synchronously on
+   * every tap would stutter the map on a phone. The pending-write queue is
+   * written immediately and separately, so nothing is at risk in the gap.
    */
+  const mirrorTimer = useRef<number | null>(null);
   const persistLocal = useCallback(
     (next: Partial<SoloData>) => {
-      writeSolo(teamCode, { ...stateRef.current, ...next });
+      const snapshot = { ...stateRef.current, ...next };
+      if (mirrorTimer.current !== null) window.clearTimeout(mirrorTimer.current);
+      mirrorTimer.current = window.setTimeout(() => {
+        mirrorTimer.current = null;
+        writeSolo(teamCode, snapshot);
+      }, 1200);
     },
     [teamCode]
   );
+
+  // Backgrounding the app must not drop a mirror write that is still pending.
+  useEffect(() => {
+    const flush = () => {
+      if (mirrorTimer.current === null) return;
+      window.clearTimeout(mirrorTimer.current);
+      mirrorTimer.current = null;
+      writeSolo(teamCode, stateRef.current);
+    };
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", flush);
+      flush();
+    };
+  }, [teamCode]);
 
   // ---- token + client -----------------------------------------------------
   useEffect(() => {
