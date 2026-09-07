@@ -361,6 +361,14 @@ export default function Page() {
           DoorKnock
         </div>
         <div className="topbar-spacer" />
+        {data.pendingCount > 0 && (
+          <span
+            className="chip chip-warn"
+            title="Marks saved on this phone that have not reached the team yet. They retry automatically."
+          >
+            {data.pendingCount} unsaved
+          </span>
+        )}
         <span className="chip" title={isCloudMode ? "Team sync" : "No database connected"}>
           <span className={`dot dot-${data.sync}`} />
           {syncLabel}

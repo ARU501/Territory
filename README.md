@@ -144,9 +144,16 @@ is Supabase Auth. The tables already carry everything it would need.
 - **Big territories are slow.** The public OpenStreetMap query service is free and
   sometimes busy; a huge polygon can take a minute or fail. A few blocks at a time works
   better and is easier to canvass anyway.
-- **It needs signal.** There is no offline mode. Marks made with no connection are held in
-  the browser tab but are not queued for later upload — if the tab is closed while offline,
-  those marks are lost.
+- **Patchy signal is handled, but only for door marks.** Marking a door always writes to the
+  phone first. If the write to the database fails, the mark goes into a queue on the device,
+  a **"3 unsaved"** badge appears in the top bar, and it retries every 15 seconds and the
+  moment the connection returns. It survives a reload or the browser evicting the tab, and
+  on the next load the unsaved marks are laid back over whatever the server returned so a
+  reload never silently undoes the rep's work.
+
+  What is **not** queued: drawing a territory, loading addresses, and deleting things. Those
+  report the failure and need redoing. They are rare and deliberate, unlike marking a door
+  every ninety seconds for four hours.
 - **Location needs HTTPS.** The find-me button works on the Vercel URL and on localhost,
   but not over plain http on a phone.
 

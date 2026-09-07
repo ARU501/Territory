@@ -185,6 +185,12 @@ button.chip {
   background: #94a3b8;
 }
 
+/* Marks held on the device because a write has not gone through yet. */
+.chip-warn {
+  background: #b45309;
+  color: #fff;
+}
+
 /* ---------- floating controls ---------- */
 
 .map-controls {

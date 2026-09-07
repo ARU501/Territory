@@ -9,10 +9,20 @@ import type { House, LatLng, Status, Territory } from "./types";
 export type SyncState = "solo" | "connecting" | "live" | "error";
 
 const soloKey = (team: string) => `doorknock:data:${slugifyTeam(team)}`;
+const pendingKey = (team: string) => `doorknock:pending:${slugifyTeam(team)}`;
 
 interface SoloData {
   territories: Territory[];
   houses: House[];
+}
+
+/** A door mark that has not made it to the database yet. */
+interface PendingWrite {
+  id: string;
+  patch: Partial<Pick<House, "status" | "notes" | "address">> & {
+    updated_by: string;
+    updated_at: string;
+  };
 }
 
 function readSolo(team: string): SoloData {
@@ -33,6 +43,33 @@ function writeSolo(team: string, data: SoloData) {
   } catch {
     /* storage full or blocked - the in-memory state still works this session */
   }
+}
+
+function readPending(team: string): PendingWrite[] {
+  if (typeof window === "undefined") return [];
+  try {
+    return (JSON.parse(window.localStorage.getItem(pendingKey(team)) ?? "[]") ??
+      []) as PendingWrite[];
+  } catch {
+    return [];
+  }
+}
+
+function writePending(team: string, queue: PendingWrite[]) {
+  try {
+    if (queue.length === 0) window.localStorage.removeItem(pendingKey(team));
+    else window.localStorage.setItem(pendingKey(team), JSON.stringify(queue));
+  } catch {
+    /* nothing more we can do; the mark is still on screen */
+  }
+}
+
+/** Later marks on the same door supersede earlier ones. */
+function queueWrite(team: string, write: PendingWrite): number {
+  const queue = readPending(team).filter((p) => p.id !== write.id);
+  queue.push(write);
+  writePending(team, queue);
+  return queue.length;
 }
 
 function newId(): string {
@@ -64,6 +101,7 @@ export function useCanvassData(
   const [loading, setLoading] = useState(true);
   const [sync, setSync] = useState<SyncState>(isCloudMode ? "connecting" : "solo");
   const [error, setError] = useState<string | null>(null);
+  const [pendingCount, setPendingCount] = useState(0);
 
   // The client is pinned to one team by a signed token, so it is rebuilt
   // whenever the team changes rather than living as a module singleton.
@@ -82,9 +120,17 @@ export function useCanvassData(
     errorSinkRef.current?.(message);
   }, []);
 
-  const persistSolo = useCallback(
+  /**
+   * Mirrors the dataset to this device in BOTH modes.
+   *
+   * In cloud mode the database is the source of truth, but it is not the only
+   * copy that matters: a rep working a basement-level street can have writes
+   * fail for an hour, and if the browser evicts the tab before they land the
+   * work is gone. The mirror plus the pending queue below mean a reload shows
+   * what they actually marked, not what the server last heard about.
+   */
+  const persistLocal = useCallback(
     (next: Partial<SoloData>) => {
-      if (isCloudMode) return;
       writeSolo(teamCode, { ...stateRef.current, ...next });
     },
     [teamCode]
@@ -161,8 +207,17 @@ export function useCanvassData(
         return;
       }
 
+      // Marks that never reached the server outrank what the server returned,
+      // or a reload would quietly undo the rep's last stretch of work.
+      const queued = readPending(teamCode);
+      const byId = new Map(queued.map((p) => [p.id, p]));
+      const serverHouses = ((h.data ?? []) as House[]).map((row) =>
+        byId.has(row.id) ? { ...row, ...byId.get(row.id)!.patch } : row
+      );
+
       setTerritories((t.data ?? []) as Territory[]);
-      setHouses((h.data ?? []) as House[]);
+      setHouses(serverHouses);
+      setPendingCount(queued.length);
       setLoading(false);
     }
 
@@ -171,6 +226,52 @@ export function useCanvassData(
       cancelled = true;
     };
   }, [teamCode, client]);
+
+  // Paint from this device's mirror straight away, so opening the app on a bad
+  // connection shows last night's territory instead of an empty map.
+  useEffect(() => {
+    if (!teamCode || !isCloudMode) return;
+    const cached = readSolo(teamCode);
+    if (cached.territories.length || cached.houses.length) {
+      setTerritories(cached.territories);
+      setHouses(cached.houses);
+    }
+    setPendingCount(readPending(teamCode).length);
+  }, [teamCode]);
+
+  // ---- retry unsaved marks ------------------------------------------------
+  useEffect(() => {
+    if (!client || !teamCode) return;
+    let stopped = false;
+
+    const drain = async () => {
+      if (stopped) return;
+      const queue = readPending(teamCode);
+      if (queue.length === 0) return;
+
+      const stillFailing: PendingWrite[] = [];
+      for (const item of queue) {
+        const { error: err } = await client.from("houses").update(item.patch).eq("id", item.id);
+        if (err) stillFailing.push(item);
+      }
+      if (stopped) return;
+
+      writePending(teamCode, stillFailing);
+      setPendingCount(stillFailing.length);
+      if (stillFailing.length < queue.length && stillFailing.length === 0) {
+        report(`Saved ${queue.length} mark${queue.length === 1 ? "" : "s"} that had not gone through.`);
+      }
+    };
+
+    drain();
+    const timer = setInterval(drain, 15000);
+    window.addEventListener("online", drain);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+      window.removeEventListener("online", drain);
+    };
+  }, [client, teamCode, report]);
 
   // ---- live sync ----------------------------------------------------------
   useEffect(() => {
@@ -246,7 +347,7 @@ export function useCanvassData(
         created_at: new Date().toISOString(),
       };
       setTerritories((prev) => [...prev, row]);
-      persistSolo({ territories: [...stateRef.current.territories, row] });
+      persistLocal({ territories: [...stateRef.current.territories, row] });
 
       const db = clientRef.current;
       if (isCloudMode) {
@@ -262,13 +363,13 @@ export function useCanvassData(
       }
       return row;
     },
-    [teamCode, rep, persistSolo]
+    [teamCode, rep, persistLocal]
   );
 
   const renameTerritory = useCallback(
     async (id: string, name: string) => {
       setTerritories((prev) => prev.map((t) => (t.id === id ? { ...t, name } : t)));
-      persistSolo({
+      persistLocal({
         territories: stateRef.current.territories.map((t) => (t.id === id ? { ...t, name } : t)),
       });
       const db = clientRef.current;
@@ -277,7 +378,7 @@ export function useCanvassData(
         if (err) report(`Renaming that area did not save: ${err.message}`);
       }
     },
-    [persistSolo, report]
+    [persistLocal, report]
   );
 
   const deleteTerritory = useCallback(
@@ -287,7 +388,7 @@ export function useCanvassData(
       const nextHouses = stateRef.current.houses.filter((h) => h.territory_id !== id);
       setTerritories(nextTerritories);
       setHouses(nextHouses);
-      persistSolo({ territories: nextTerritories, houses: nextHouses });
+      persistLocal({ territories: nextTerritories, houses: nextHouses });
 
       const db = clientRef.current;
       if (db) {
@@ -303,7 +404,7 @@ export function useCanvassData(
         }
       }
     },
-    [persistSolo, report]
+    [persistLocal, report]
   );
 
   const addHouses = useCallback(
@@ -324,7 +425,7 @@ export function useCanvassData(
       if (rows.length === 0) return [];
 
       setHouses((prev) => [...prev, ...rows]);
-      persistSolo({ houses: [...stateRef.current.houses, ...rows] });
+      persistLocal({ houses: [...stateRef.current.houses, ...rows] });
 
       const db = clientRef.current;
       if (isCloudMode) {
@@ -353,7 +454,7 @@ export function useCanvassData(
       }
       return rows;
     },
-    [teamCode, rep, persistSolo]
+    [teamCode, rep, persistLocal]
   );
 
   const updateHouse = useCallback(
@@ -361,19 +462,27 @@ export function useCanvassData(
       const full = { ...patch, updated_by: rep, updated_at: new Date().toISOString() };
       const apply = (list: House[]) => list.map((h) => (h.id === id ? { ...h, ...full } : h));
       setHouses(apply);
-      persistSolo({ houses: apply(stateRef.current.houses) });
+      persistLocal({ houses: apply(stateRef.current.houses) });
 
       const db = clientRef.current;
-      if (db) {
+      if (isCloudMode) {
+        // No client yet, or the write failed: keep it on disk and retry rather
+        // than letting the mark exist only in a tab that may be evicted.
+        if (!db) {
+          setPendingCount(queueWrite(teamCode, { id, patch: full }));
+          return;
+        }
         const { error: err } = await db.from("houses").update(full).eq("id", id);
         if (err) {
+          const count = queueWrite(teamCode, { id, patch: full });
+          setPendingCount(count);
           const address =
             stateRef.current.houses.find((h) => h.id === id)?.address || "that house";
-          report(`${address} did not save: ${err.message}. Mark it again when you have signal.`);
+          report(`${address} has not saved yet — kept on this phone and retrying.`);
         }
       }
     },
-    [rep, persistSolo, report]
+    [rep, teamCode, persistLocal, report]
   );
 
   const deleteHouse = useCallback(
@@ -381,7 +490,12 @@ export function useCanvassData(
       const doomed = stateRef.current.houses.find((h) => h.id === id);
       const next = stateRef.current.houses.filter((h) => h.id !== id);
       setHouses(next);
-      persistSolo({ houses: next });
+      persistLocal({ houses: next });
+
+      // Drop any queued mark for a house that is being removed.
+      const queue = readPending(teamCode).filter((p) => p.id !== id);
+      writePending(teamCode, queue);
+      setPendingCount(queue.length);
 
       const db = clientRef.current;
       if (db) {
@@ -393,7 +507,7 @@ export function useCanvassData(
         }
       }
     },
-    [persistSolo, report]
+    [teamCode, persistLocal, report]
   );
 
   const housesByTerritory = useMemo(() => {
@@ -414,6 +528,7 @@ export function useCanvassData(
     loading,
     sync,
     error,
+    pendingCount,
     addTerritory,
     renameTerritory,
     deleteTerritory,
