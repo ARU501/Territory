@@ -34,7 +34,15 @@ import {
 import { isCloudMode } from "@/lib/supabase";
 import { distanceM, pointInPolygon, simplify } from "@/lib/geo";
 import { fetchHousesInPolygon } from "@/lib/overpass";
-import { STATUSES, STATUS_MAP, TERRITORY_COLORS, type LatLng, type Status, type Territory } from "@/lib/types";
+import {
+  STATUSES,
+  STATUS_MAP,
+  TERRITORY_COLORS,
+  isExcluded,
+  type LatLng,
+  type Status,
+  type Territory,
+} from "@/lib/types";
 
 const MapView = dynamic(() => import("@/components/MapView"), {
   ssr: false,
@@ -211,8 +219,14 @@ export default function Page() {
     (id: string) => {
       const list = data.housesByTerritory.get(id) ?? [];
       let worked = 0;
-      for (const h of list) if (STATUS_MAP[h.status]?.worked) worked++;
-      return { total: list.length, worked };
+      let excluded = 0;
+      for (const h of list) {
+        if (isExcluded(h.status)) excluded++;
+        else if (STATUS_MAP[h.status]?.worked) worked++;
+      }
+      // Off-limits doors leave the denominator entirely, so a finished
+      // territory actually reaches 100%.
+      return { total: list.length - excluded, worked, excluded };
     },
     [data.housesByTerritory]
   );
@@ -228,7 +242,11 @@ export default function Page() {
       (sum, s) => sum + (counts.get(s.id) ?? 0),
       0
     );
-    return { counts, worked, total: list.length };
+    const excluded = STATUSES.filter((s) => s.excluded).reduce(
+      (sum, s) => sum + (counts.get(s.id) ?? 0),
+      0
+    );
+    return { counts, worked, excluded, total: list.length - excluded };
   }, [activeTerritoryId, data.housesByTerritory]);
 
   const selectedHouse = useMemo(
@@ -502,9 +520,14 @@ export default function Page() {
                 </button>
               </div>
               <div className="terr-sub">
-                {activeBreakdown.total === 0
-                  ? "No houses loaded yet"
-                  : `${activeBreakdown.worked} of ${activeBreakdown.total} doors worked`}
+                {activeBreakdown.total === 0 && activeBreakdown.excluded > 0
+                  ? `${activeBreakdown.excluded} doors · off limits`
+                  : activeBreakdown.total === 0
+                    ? "No houses loaded yet"
+                    : `${activeBreakdown.worked} of ${activeBreakdown.total} doors worked` +
+                      (activeBreakdown.excluded > 0
+                        ? ` · ${activeBreakdown.excluded} off limits`
+                        : "")}
               </div>
               {activeBreakdown.total > 0 && (
                 <>

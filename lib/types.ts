@@ -5,7 +5,8 @@ export type Status =
   | "knocked"
   | "not_home"
   | "not_interested"
-  | "interested";
+  | "interested"
+  | "do_not_knock";
 
 export interface StatusMeta {
   id: Status;
@@ -14,6 +15,15 @@ export interface StatusMeta {
   color: string;
   /** Counts toward "houses worked" in progress stats. */
   worked: boolean;
+  /**
+   * Taken out of the total altogether rather than counted as done.
+   *
+   * A house nobody is allowed to knock is not work outstanding and not work
+   * completed — it is not work. Counting it either way lies: as outstanding, a
+   * finished territory never reaches 100%; as completed, progress looks better
+   * than it is. Removing it from the denominator makes 100% mean finished.
+   */
+  excluded?: boolean;
 }
 
 /**
@@ -34,8 +44,19 @@ export const STATUSES: StatusMeta[] = [
   { id: "not_interested", label: "Not interested", short: "No", color: "#ef4444", worked: true },
   { id: "interested", label: "Interested", short: "Interested", color: "#22c55e", worked: true },
   { id: "knocked", label: "Knocked", short: "Knocked", color: "#3b82f6", worked: true },
+  {
+    id: "do_not_knock",
+    label: "Do not knock",
+    short: "Off limits",
+    color: "#1f2937",
+    worked: false,
+    excluded: true,
+  },
   { id: "not_knocked", label: "Not knocked yet", short: "New", color: "#94a3b8", worked: false },
 ];
+
+/** Houses that should not be counted as work at all. */
+export const isExcluded = (status: Status) => Boolean(STATUS_MAP[status]?.excluded);
 
 export const STATUS_MAP: Record<Status, StatusMeta> = STATUSES.reduce(
   (acc, s) => ({ ...acc, [s.id]: s }),

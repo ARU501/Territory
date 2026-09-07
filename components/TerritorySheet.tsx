@@ -6,8 +6,10 @@ import { IconPlus, IconTarget, IconTrash } from "./Icons";
 import type { Territory } from "@/lib/types";
 
 export interface TerritoryStats {
+  /** Doors that count as work: off-limits ones are already removed. */
   total: number;
   worked: number;
+  excluded: number;
 }
 
 interface TerritorySheetProps {
@@ -59,7 +61,7 @@ export default function TerritorySheet({
       ) : (
         <div style={{ marginTop: 12 }}>
           {sorted.map((t) => {
-            const { total, worked } = statsFor(t.id);
+            const { total, worked, excluded } = statsFor(t.id);
             const pct = total === 0 ? 0 : Math.round((worked / total) * 100);
             const expanded = openId === t.id;
 
@@ -94,7 +96,12 @@ export default function TerritorySheet({
                     >
                       <div className="terr-row-name">{t.name}</div>
                       <div className="terr-sub">
-                        {total === 0 ? "No houses loaded" : `${worked} of ${total} doors worked`}
+                        {total === 0 && excluded > 0
+                          ? `${excluded} doors · off limits`
+                          : total === 0
+                            ? "No houses loaded"
+                            : `${worked} of ${total} doors worked` +
+                              (excluded > 0 ? ` · ${excluded} off limits` : "")}
                         {t.created_by ? ` · drawn by ${t.created_by}` : ""}
                       </div>
                     </button>
@@ -140,7 +147,7 @@ export default function TerritorySheet({
                             setConfirmId(null);
                           }}
                         >
-                          Delete area and its {statsFor(t.id).total} houses
+                          Delete area and its {statsFor(t.id).total + statsFor(t.id).excluded} houses
                         </button>
                       ) : (
                         <button
