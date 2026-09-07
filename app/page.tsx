@@ -529,7 +529,7 @@ export default function Page() {
                         ? ` · ${activeBreakdown.excluded} off limits`
                         : "")}
               </div>
-              {activeBreakdown.total > 0 && (
+              {(activeBreakdown.total > 0 || activeBreakdown.excluded > 0) && (
                 <>
                   <div className="progress">
                     {STATUSES.filter((s) => s.worked).map((s) => {
@@ -539,7 +539,9 @@ export default function Page() {
                         <span
                           key={s.id}
                           style={{
-                            width: `${(n / activeBreakdown.total) * 100}%`,
+                            width: `${
+                              activeBreakdown.total > 0 ? (n / activeBreakdown.total) * 100 : 0
+                            }%`,
                             background: s.color,
                           }}
                         />
@@ -560,7 +562,10 @@ export default function Page() {
                   </div>
                 </>
               )}
-              {activeBreakdown.total === 0 && (
+              {/* Only offer to fetch houses when the area genuinely has none.
+                  An entirely off-limits area has plenty — they just are not
+                  work, and inviting a reload there makes no sense. */}
+              {activeBreakdown.total === 0 && activeBreakdown.excluded === 0 && (
                 <button
                   className="btn btn-quiet btn-block"
                   style={{ marginTop: 10 }}
