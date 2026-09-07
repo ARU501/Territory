@@ -559,6 +559,10 @@ button.chip {
 }
 
 .section-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -567,9 +571,18 @@ button.chip {
   margin: 18px 0 8px;
 }
 
+/* Quietly confirms the autosave, so a rep is not left wondering. */
+.label-hint {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
 .status-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 8px;
 }
 
@@ -577,20 +590,20 @@ button.chip {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 56px;
-  padding: 12px 13px;
-  border-radius: 11px;
+  min-height: 58px;
+  padding: 12px 15px;
+  border-radius: 12px;
   border: 1.5px solid var(--line);
   background: #fff;
-  font-weight: 600;
-  font-size: 13.5px;
+  font-weight: 650;
+  font-size: 15.5px;
   text-align: left;
   transition: border-color 0.12s ease, background 0.12s ease;
 }
 
 .status-btn .legend-swatch {
-  width: 12px;
-  height: 12px;
+  width: 15px;
+  height: 15px;
 }
 
 .status-btn.is-active {

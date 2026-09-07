@@ -112,7 +112,7 @@ async function main() {
   const ins = events.find((e) => e.eventType === "INSERT" && e.new?.id === h.id);
   mark(!!ins, "INSERT delivered", ins ? `${Object.keys(ins.new).length} columns` : "nothing arrived");
 
-  await quiet.from("houses").update({ status: "sold" }).eq("id", h.id);
+  await quiet.from("houses").update({ status: "knocked" }).eq("id", h.id);
   await sleep(4000);
   const upd = events.find((e) => e.eventType === "UPDATE" && e.new?.id === h.id);
   mark(!!upd, "UPDATE delivered", upd ? `status=${upd.new.status}` : "nothing arrived");

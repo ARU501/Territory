@@ -241,7 +241,7 @@ async function main() {
   // ------------------------------------------------------- realtime payloads
   section("Realtime delivery");
   const target = many[0];
-  await a.from("houses").update({ status: "sold", notes: "verify note", updated_by: "verify" }).eq("id", target.id);
+  await a.from("houses").update({ status: "knocked", notes: "verify note", updated_by: "verify" }).eq("id", target.id);
 
   const upd = await waitFor(events, (e) => e.table === "houses" && e.eventType === "UPDATE" && e.new?.id === target.id);
   check("UPDATE event arrives", !!upd);
@@ -250,7 +250,7 @@ async function main() {
     const whole = ["id", "team_code", "territory_id", "lat", "lng", "address", "status", "notes", "updated_by", "updated_at"]
       .every((c) => cols.includes(c));
     check("payload.new is a WHOLE row, not just changed columns", whole, `${cols.length} columns`);
-    check("payload.new carries the new status", upd.new?.status === "sold", String(upd.new?.status));
+    check("payload.new carries the new status", upd.new?.status === "knocked", String(upd.new?.status));
   }
 
   const insEvent = await waitFor(events, (e) => e.table === "territories" && e.eventType === "INSERT");

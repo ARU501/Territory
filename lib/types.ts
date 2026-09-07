@@ -2,12 +2,10 @@ export type LatLng = [number, number]; // [lat, lng]
 
 export type Status =
   | "not_knocked"
+  | "knocked"
   | "not_home"
   | "not_interested"
-  | "interested"
-  | "appointment"
-  | "sold"
-  | "do_not_knock";
+  | "interested";
 
 export interface StatusMeta {
   id: Status;
@@ -18,14 +16,25 @@ export interface StatusMeta {
   worked: boolean;
 }
 
+/**
+ * Deliberately short — a rep standing at a door should not be reading a menu.
+ *
+ * Ordered by how often it gets tapped, not alphabetically or by sentiment:
+ * most knocks end in nobody answering, so that sits under the thumb first.
+ * "Not knocked" is last because it is the undo, not an outcome.
+ *
+ * Colours read as a traffic light so the map is legible at a glance: amber
+ * come back, red no, green lead, blue spoke to them, grey untouched.
+ *
+ * Statuses removed from this list still degrade safely — every lookup falls
+ * back to "not knocked" rather than crashing on an unrecognised value.
+ */
 export const STATUSES: StatusMeta[] = [
-  { id: "not_knocked", label: "Not knocked", short: "New", color: "#94a3b8", worked: false },
-  { id: "not_home", label: "Not home", short: "N/H", color: "#f59e0b", worked: true },
+  { id: "not_home", label: "Not home", short: "Not home", color: "#f59e0b", worked: true },
   { id: "not_interested", label: "Not interested", short: "No", color: "#ef4444", worked: true },
-  { id: "interested", label: "Interested", short: "Int", color: "#3b82f6", worked: true },
-  { id: "appointment", label: "Appointment set", short: "Appt", color: "#a855f7", worked: true },
-  { id: "sold", label: "Sold", short: "Sold", color: "#22c55e", worked: true },
-  { id: "do_not_knock", label: "Do not knock", short: "DNK", color: "#1f2937", worked: true },
+  { id: "interested", label: "Interested", short: "Interested", color: "#22c55e", worked: true },
+  { id: "knocked", label: "Knocked", short: "Knocked", color: "#3b82f6", worked: true },
+  { id: "not_knocked", label: "Not knocked yet", short: "New", color: "#94a3b8", worked: false },
 ];
 
 export const STATUS_MAP: Record<Status, StatusMeta> = STATUSES.reduce(

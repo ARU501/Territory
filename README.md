@@ -18,8 +18,24 @@ inside your outline and drops a pin on each one, with the real street address. A
 area typically comes back with 100–200 houses in a few seconds. Where an area has buildings
 mapped but no addresses, it falls back to building footprints so you still get pins.
 
-**Mark doors.** Tap a pin and choose: Not home · Not interested · Interested · Appointment
-set · Sold · Do not knock. Add notes per house ("dog in the yard", "come back after 6").
+**Mark doors.** Tap a pin and choose one of four, kept deliberately short so nobody is
+reading a menu on a doorstep:
+
+| | |
+|---|---|
+| **Not home** | nobody answered — come back |
+| **Not interested** | they said no |
+| **Interested** | a lead worth following up |
+| **Knocked** | spoke to them, nothing else to record |
+
+They are ordered by how often they get tapped, not alphabetically, so the common one is
+under the thumb first. *Not knocked yet* sits at the bottom as the undo.
+
+**Notes on any house.** A free-text note per door — "dog in the yard", "come back after 6",
+"wife decides", "renting". It saves as you type and says so. Houses carrying a note get a
+dark ring on the map, so what you wrote is visible while you walk instead of only after
+opening the house. Notes come out in the CSV export.
+
 Every mark is stamped with who did it and when.
 
 **See progress.** The territory card shows *64 of 156 doors worked* with a colour breakdown,

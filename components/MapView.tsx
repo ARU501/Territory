@@ -274,11 +274,14 @@ export default function MapView(props: MapViewProps) {
       const meta = STATUS_MAP[h.status] ?? STATUS_MAP.not_knocked;
       const selected = h.id === selectedHouseId;
       const dimmed = activeTerritoryId !== null && h.territory_id !== activeTerritoryId;
+      // A house someone left a note on gets a dark ring, so "come back after 6"
+      // is visible from the map instead of only after opening the house.
+      const hasNote = Boolean(h.notes && h.notes.trim());
 
       const style: L.CircleMarkerOptions = {
         radius: selected ? radius + 4 : radius,
-        color: selected ? "#0f172a" : "#ffffff",
-        weight: selected ? 3 : stroke,
+        color: selected ? "#0f172a" : hasNote ? "#0f172a" : "#ffffff",
+        weight: selected ? 3 : hasNote ? Math.max(stroke, 2.5) : stroke,
         fillColor: meta.color,
         fillOpacity: dimmed ? 0.35 : 1,
         opacity: dimmed ? 0.5 : 1,

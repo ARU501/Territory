@@ -65,11 +65,15 @@ export default function HouseSheet({
 
   // Notes save as they are typed. Waiting for blur loses a note whenever the
   // sheet is dismissed with the keyboard still open.
+  const unsaved = notes.trim() !== (house.notes ?? "");
   useEffect(() => {
-    if (notes.trim() === (house.notes ?? "")) return;
+    if (!unsaved) return;
     const timer = setTimeout(commitNotes, 700);
     return () => clearTimeout(timer);
-  }, [notes, house.notes, commitNotes]);
+  }, [unsaved, commitNotes]);
+
+  // Reps have no reason to trust an invisible autosave, so say it out loud.
+  const saveState = unsaved ? "saving…" : notes.trim() ? "saved" : "saves as you type";
 
   function commitAddress() {
     const next = address.trim();
@@ -132,13 +136,20 @@ export default function HouseSheet({
         })}
       </div>
 
-      <div className="section-label">Notes</div>
+      <div className="section-label">
+        Notes
+        <span className="label-hint">{saveState}</span>
+      </div>
       <textarea
         className="notes"
         value={notes}
         onChange={(e) => setNotes(e.target.value)}
         onBlur={commitNotes}
-        placeholder="Dog in the yard, come back after 6, spouse decides…"
+        rows={4}
+        placeholder={
+          "Anything worth knowing next time.\n" +
+          "Dog in the yard · come back after 6 · wife decides · renting"
+        }
       />
 
       <div className="row" style={{ marginTop: 14 }}>

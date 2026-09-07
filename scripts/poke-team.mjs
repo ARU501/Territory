@@ -19,7 +19,7 @@ const env = Object.fromEntries(
     .map((l) => { const i = l.indexOf("="); return [l.slice(0, i).trim(), l.slice(i + 1).trim()]; })
 );
 
-const [team, status = "sold"] = process.argv.slice(2);
+const [team, status = "knocked"] = process.argv.slice(2);
 const b64url = (b) => Buffer.from(b).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 const iat = Math.floor(Date.now() / 1000);
 const head = b64url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
