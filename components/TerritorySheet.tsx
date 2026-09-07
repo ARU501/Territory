@@ -67,38 +67,38 @@ export default function TerritorySheet({
               <div key={t.id} style={{ borderBottom: "1px solid var(--line)" }}>
                 <div className="terr-row" style={{ borderBottom: "none" }}>
                   <span className="swatch" style={{ background: t.color }} />
-                  <button
-                    className="terr-row-main"
-                    onClick={() => setOpenId(expanded ? null : t.id)}
-                    style={{ textAlign: "left" }}
-                  >
-                    {renamingId === t.id ? (
-                      <input
-                        className="field"
-                        value={draftName}
-                        onChange={(e) => setDraftName(e.target.value)}
-                        onClick={(e) => e.stopPropagation()}
-                        onBlur={() => {
-                          if (draftName.trim()) onRename(t.id, draftName.trim());
-                          setRenamingId(null);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") e.currentTarget.blur();
-                        }}
-                        autoFocus
-                      />
-                    ) : (
-                      <>
-                        <div className="terr-row-name">{t.name}</div>
-                        <div className="terr-sub">
-                          {total === 0
-                            ? "No houses loaded"
-                            : `${worked} of ${total} doors worked`}
-                          {t.created_by ? ` · drawn by ${t.created_by}` : ""}
-                        </div>
-                      </>
-                    )}
-                  </button>
+                  {renamingId === t.id ? (
+                    // Rendered instead of the row button, never inside it: a
+                    // nested input is invalid HTML and on mobile the button
+                    // steals the tap before the field can take focus.
+                    <input
+                      className="field terr-row-main"
+                      value={draftName}
+                      onChange={(e) => setDraftName(e.target.value)}
+                      onBlur={() => {
+                        if (draftName.trim()) onRename(t.id, draftName.trim());
+                        setRenamingId(null);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === "Escape") e.currentTarget.blur();
+                      }}
+                      aria-label={`Rename ${t.name}`}
+                      autoFocus
+                    />
+                  ) : (
+                    <button
+                      className="terr-row-main"
+                      onClick={() => setOpenId(expanded ? null : t.id)}
+                      style={{ textAlign: "left" }}
+                      aria-expanded={expanded}
+                    >
+                      <div className="terr-row-name">{t.name}</div>
+                      <div className="terr-sub">
+                        {total === 0 ? "No houses loaded" : `${worked} of ${total} doors worked`}
+                        {t.created_by ? ` · drawn by ${t.created_by}` : ""}
+                      </div>
+                    </button>
+                  )}
                   <span className="pct">{pct}%</span>
                 </div>
 

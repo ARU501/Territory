@@ -21,6 +21,7 @@ import {
 import type { Basemap, MapHandle, MapMode } from "@/components/MapView";
 
 import { useCanvassData } from "@/lib/store";
+import { useWakeLock } from "@/lib/useWakeLock";
 import { isCloudMode } from "@/lib/supabase";
 import { distanceM, pointInPolygon, simplify } from "@/lib/geo";
 import { fetchHousesInPolygon } from "@/lib/overpass";
@@ -76,6 +77,10 @@ export default function Page() {
   const reportWriteError = useCallback((message: string) => pushToast(message, "err"), [pushToast]);
 
   const data = useCanvassData(team, rep, reportWriteError);
+
+  // Keep the screen on while a rep is actually working a territory, so they are
+  // not unlocking the phone between every door.
+  useWakeLock(Boolean(team && rep && !showGate));
 
   // ---- restore session ----------------------------------------------------
   useEffect(() => {
@@ -380,9 +385,15 @@ export default function Page() {
           <span className="brand-mark">
             <IconDoor size={15} />
           </span>
-          DoorKnock
+          <span className="brand-text">DoorKnock</span>
         </div>
         <div className="topbar-spacer" />
+        {data.loading && isCloudMode && (
+          <span className="chip" title="Fetching this team's territories and doors">
+            <span className="spinner chip-spinner" />
+            Loading
+          </span>
+        )}
         {data.pendingCount > 0 && (
           <span
             className="chip chip-warn"
@@ -396,9 +407,9 @@ export default function Page() {
           {syncLabel}
         </span>
         <button
-          className="chip"
+          className="chip chip-team"
           onClick={() => setShowGate(true)}
-          title="Switch team or change your name"
+          title={`${rep} on team ${team} — tap to switch`}
         >
           {rep} · {team}
         </button>

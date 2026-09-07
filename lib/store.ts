@@ -177,6 +177,11 @@ export function useCanvassData(
     [teamCode]
   );
 
+  // The load effect must not list persistLocal as a dependency, or changing the
+  // team would re-run the fetch twice; a ref keeps it current without that.
+  const persistLocalRef = useRef(persistLocal);
+  persistLocalRef.current = persistLocal;
+
   // Backgrounding the app must not drop a mirror write that is still pending.
   useEffect(() => {
     const flush = () => {
@@ -276,6 +281,12 @@ export function useCanvassData(
       setHouses(serverHouses);
       setPendingCount(queued.length);
       setLoading(false);
+
+      // Mirror what we just fetched. Without this the mirror only fills once a
+      // rep marks something, so every cold open re-downloads the whole
+      // territory — twelve paged requests and about twenty seconds of blank
+      // map on a phone. Debounced, so it costs one write shortly after load.
+      persistLocalRef.current({ territories: t.rows, houses: serverHouses });
     }
 
     load();

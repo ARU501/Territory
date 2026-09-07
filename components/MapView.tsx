@@ -129,6 +129,10 @@ export default function MapView(props: MapViewProps) {
       zoomControl: false,
       attributionControl: true,
       preferCanvas: true,
+      // House pins are 5-9px; the canvas renderer hit-tests them on exactly
+      // that radius, which is far below a fingertip. The tolerance gives a
+      // thumb roughly a 40px target without making the dots visually bigger.
+      renderer: L.canvas({ tolerance: 14 }),
     });
     mapRef.current = map;
 

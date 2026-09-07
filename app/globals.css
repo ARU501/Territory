@@ -45,6 +45,10 @@ button {
   border: none;
   background: none;
   color: inherit;
+  /* Removes the 300ms tap delay and stops double-tap zooming the page. */
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 input,
@@ -96,9 +100,10 @@ select {
 }
 
 .leaflet-control-zoom a {
-  width: 36px !important;
-  height: 36px !important;
-  line-height: 36px !important;
+  width: 44px !important;
+  height: 44px !important;
+  line-height: 44px !important;
+  font-size: 20px !important;
   color: var(--ink) !important;
   border-color: var(--line) !important;
 }
@@ -150,13 +155,27 @@ select {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 10px;
+  padding: 0 12px;
+  min-height: 34px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 600;
   background: rgba(255, 255, 255, 0.12);
   color: #e2e8f0;
   white-space: nowrap;
+  flex: none;
+}
+
+/* Team codes are deliberately long and unguessable, so this one has to be
+   allowed to shrink rather than push the rest of the bar off screen. */
+.chip-team {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: inline-block;
+  line-height: 34px;
+  max-width: 46vw;
 }
 
 .chip button,
@@ -191,12 +210,46 @@ button.chip {
   color: #fff;
 }
 
+/* On a narrow phone the wordmark is the first thing worth losing: the icon
+   still identifies the app, and the space goes to the status chips. */
+@media (max-width: 430px) {
+  .brand-text {
+    display: none;
+  }
+  .topbar {
+    gap: 8px;
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+  .terr-card {
+    min-width: 0;
+    max-width: calc(100vw - 84px);
+  }
+  .map-top-left {
+    max-width: calc(100% - 76px);
+  }
+}
+
+/* Short screens in landscape: give the map back as much height as possible. */
+@media (max-height: 520px) {
+  .sheet {
+    max-height: 92dvh;
+  }
+  .map-controls {
+    gap: 6px;
+  }
+  .fab {
+    width: 44px;
+    height: 44px;
+  }
+}
+
 /* ---------- floating controls ---------- */
 
 .map-controls {
   position: absolute;
   right: 12px;
-  bottom: 16px;
+  bottom: calc(16px + var(--safe-bottom));
   z-index: 900;
   display: flex;
   flex-direction: column;
@@ -204,8 +257,8 @@ button.chip {
 }
 
 .fab {
-  width: 46px;
-  height: 46px;
+  width: 50px;
+  height: 50px;
   border-radius: 12px;
   background: #fff;
   color: var(--ink-2);
@@ -358,7 +411,8 @@ button.chip {
 
 .btn {
   border-radius: 10px;
-  padding: 11px 14px;
+  min-height: 48px;
+  padding: 12px 16px;
   font-weight: 650;
   font-size: 14px;
   display: inline-flex;
@@ -419,6 +473,7 @@ button.chip {
   background: rgba(15, 23, 42, 0.35);
   z-index: 1100;
   animation: fade 0.15s ease;
+  transition: opacity 0.2s ease;
 }
 
 .sheet {
@@ -432,8 +487,14 @@ button.chip {
   box-shadow: var(--shadow-lg);
   padding: 8px 16px calc(16px + var(--safe-bottom));
   max-height: 88vh;
+  max-height: 88dvh; /* dvh tracks the shrinking viewport when browser chrome
+                        or the keyboard appears; vh does not */
   overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   animation: rise 0.2s cubic-bezier(0.2, 0.8, 0.3, 1);
+  transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.3, 1);
+  will-change: transform;
 }
 
 @media (min-width: 720px) {
@@ -443,7 +504,7 @@ button.chip {
     bottom: 16px;
     width: 380px;
     border-radius: 16px;
-    max-height: calc(100vh - 120px);
+    max-height: calc(100dvh - 120px);
   }
 }
 
@@ -460,12 +521,27 @@ button.chip {
   }
 }
 
+/* Generous invisible target around the handle: the drag has to be easy to
+   start with a thumb, but the handle itself should stay visually slight. */
+.grabber-hit {
+  display: block;
+  width: 100%;
+  padding: 6px 0 4px;
+  margin: -4px 0 8px;
+  touch-action: none;
+  cursor: grab;
+}
+
+.grabber-hit:active {
+  cursor: grabbing;
+}
+
 .grabber {
-  width: 40px;
-  height: 4px;
+  width: 44px;
+  height: 5px;
   border-radius: 999px;
   background: var(--line-strong);
-  margin: 4px auto 12px;
+  margin: 0 auto;
 }
 
 .sheet-title {
@@ -500,8 +576,9 @@ button.chip {
 .status-btn {
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 12px 12px;
+  gap: 10px;
+  min-height: 56px;
+  padding: 12px 13px;
   border-radius: 11px;
   border: 1.5px solid var(--line);
   background: #fff;
@@ -523,12 +600,14 @@ button.chip {
 
 textarea.notes {
   width: 100%;
-  min-height: 84px;
+  /* 16px minimum: anything smaller makes iOS zoom the page on focus, which
+     throws the rep out of the map mid-knock. */
+  font-size: 16px;
+  min-height: 96px;
   resize: vertical;
   border: 1.5px solid var(--line);
   border-radius: 11px;
-  padding: 10px 12px;
-  font-size: 14px;
+  padding: 12px 14px;
   line-height: 1.45;
   outline: none;
 }
@@ -542,8 +621,8 @@ input.field {
   width: 100%;
   border: 1.5px solid var(--line);
   border-radius: 11px;
-  padding: 12px 12px;
-  font-size: 15px;
+  padding: 13px 14px;
+  font-size: 16px; /* see the note on textarea.notes */
   outline: none;
 }
 
@@ -565,7 +644,8 @@ input.field {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 11px 4px;
+  min-height: 56px;
+  padding: 12px 4px;
   border-bottom: 1px solid var(--line);
   width: 100%;
   text-align: left;
@@ -726,6 +806,13 @@ input.field {
   border-top-color: #fff;
   animation: spin 0.7s linear infinite;
   flex: none;
+}
+
+/* Inline spinner sized for the top bar chips. */
+.chip-spinner {
+  width: 12px;
+  height: 12px;
+  border-width: 2px;
 }
 
 .spinner.dark {

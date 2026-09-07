@@ -12,10 +12,16 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
+  // Pinch-zoom stays available: blocking it fails WCAG and hurts anyone who
+  // needs larger text. Leaflet claims its own gestures over the map, so
+  // pinching the map still zooms the map rather than the page.
+  maximumScale: 5,
+  userScalable: true,
   themeColor: "#0f172a",
   viewportFit: "cover",
+  // Shrink the layout for the keyboard instead of scrolling it out of view,
+  // so the notes field stays visible while a rep types.
+  interactiveWidget: "resizes-content",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
