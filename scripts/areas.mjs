@@ -50,6 +50,9 @@ export const AREAS = {
     polygon: WORKED_GRID,
     name: "Worked grid — Antelope to 2200 S",
     color: "#dc2626",
-    status: "do_not_knock",
+    // Covered ground, so it counts as work done rather than excluded. The map
+    // records which doors were walked, not who answered, and "not home" is
+    // both the commonest real outcome and the one that claims least.
+    status: "not_home",
   },
 };
