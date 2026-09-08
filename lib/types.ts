@@ -76,19 +76,19 @@ export interface Territory {
 /**
  * What a pin stands for.
  *
- * "house" is one front door. "complex" is an apartment building: one stop that
- * happens to contain many doors, carrying a name and drawn as a labelled pin
- * rather than a dot. It is marked as a single thing — the individual units are
- * deliberately not tracked.
+ * "house" is one front door. "complex" is an apartment building: a single pin
+ * that stands in for many doors, carrying the building's name. "unit" is one of
+ * those doors — units share their building's coordinates exactly, so they are
+ * never drawn on the map, only listed inside it.
  */
-export type HouseKind = "house" | "complex";
+export type HouseKind = "house" | "complex" | "unit";
 
 /**
  * Rows written before apartments existed have no kind, and neither do rows
  * restored from an older copy of this device's offline mirror. Both are houses.
  */
 export const kindOf = (kind: string | null | undefined): HouseKind =>
-  kind === "complex" ? "complex" : "house";
+  kind === "complex" || kind === "unit" ? kind : "house";
 
 export interface House {
   id: string;
@@ -102,6 +102,8 @@ export interface House {
   updated_by: string;
   updated_at: string;
   kind: HouseKind;
+  /** Set on a unit: the complex it belongs to. Null on everything else. */
+  parent_id: string | null;
   /** The building's name. Only meaningful on a complex. */
   name: string;
 }
@@ -110,6 +112,30 @@ export interface House {
 export type HousePatch = Partial<
   Pick<House, "status" | "notes" | "address" | "name" | "lat" | "lng">
 >;
+
+/**
+ * Progress for one building, given its units.
+ *
+ * A building with no units yet is a single stop and reports its own status. One
+ * with units is a container: the units are the doors, and the building's own
+ * status is not counted anywhere.
+ */
+export interface ComplexProgress {
+  units: number;
+  total: number;
+  worked: number;
+  excluded: number;
+}
+
+export function complexProgress(units: House[]): ComplexProgress {
+  let worked = 0;
+  let excluded = 0;
+  for (const u of units) {
+    if (isExcluded(u.status)) excluded++;
+    else if (STATUS_MAP[u.status]?.worked) worked++;
+  }
+  return { units: units.length, total: units.length - excluded, worked, excluded };
+}
 
 export const TERRITORY_COLORS = [
   "#2563eb",

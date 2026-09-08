@@ -1,9 +1,58 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Sheet from "./Sheet";
-import { IconMove, IconTarget, IconTrash } from "./Icons";
-import { STATUSES, STATUS_MAP, type House, type Status } from "@/lib/types";
+import { IconMove, IconPlus, IconTarget, IconTrash } from "./Icons";
+import { STATUSES, STATUS_MAP, complexProgress, type House, type Status } from "@/lib/types";
+
+/** How many doors one Add may create. A slipped thumb on "1-9999" should not land. */
+export const MAX_NEW_UNITS = 400;
+
+/**
+ * Turns what a rep types into unit numbers.
+ *
+ * Accepts ranges and lists in the shapes people actually write on a clipboard:
+ * "101-124", "1 to 12", "101-112, 201-212", "A, B, Basement". Anything that is
+ * not a numeric range is taken literally, so lettered and named doors work
+ * without a second input to explain themselves.
+ */
+export function parseUnitLabels(input: string): { labels: string[]; truncated: boolean } {
+  const seen = new Set<string>();
+  let truncated = false;
+
+  const push = (label: string) => {
+    if (seen.size >= MAX_NEW_UNITS) {
+      truncated = true;
+      return;
+    }
+    seen.add(label);
+  };
+
+  for (const chunk of input.split(/[,;\n]/)) {
+    const raw = chunk.trim();
+    if (!raw) continue;
+
+    const range = raw.match(/^(\d+)\s*(?:-|–|—|to|through)\s*(\d+)$/i);
+    if (!range) {
+      push(raw);
+      continue;
+    }
+
+    let from = Number(range[1]);
+    let to = Number(range[2]);
+    // A range written backwards is a typo, not a request for nothing.
+    if (from > to) [from, to] = [to, from];
+    // "0101-0112" is numbering rather than arithmetic, so keep the zeroes — but
+    // "1-24" must not turn into "01", which is a different door on some blocks.
+    const pad = range[1].startsWith("0") ? range[1].length : 0;
+    for (let n = from; n <= to; n++) {
+      push(String(n).padStart(pad, "0"));
+      if (truncated) break;
+    }
+  }
+
+  return { labels: [...seen], truncated };
+}
 
 /**
  * Saves as you type, the same way the notes field does.
@@ -23,51 +72,39 @@ function useAutosave(draft: string, saved: string, commit: (value: string) => vo
   return unsaved;
 }
 
-function relativeTime(iso: string): string {
-  const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return "";
-  const mins = Math.round((Date.now() - then) / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins} min ago`;
-  const hours = Math.round(mins / 60);
-  if (hours < 24) return `${hours} hr ago`;
-  const days = Math.round(hours / 24);
-  if (days < 30) return `${days} day${days === 1 ? "" : "s"} ago`;
-  return new Date(iso).toLocaleDateString();
-}
-
 interface ComplexSheetProps {
   complex: House;
+  units: House[];
   territoryName: string | null;
   onClose: () => void;
   onRename: (name: string) => void;
   onAddress: (address: string) => void;
   onNotes: (notes: string) => void;
   onStatus: (status: Status) => void;
+  onAddUnits: (labels: string[]) => void;
+  onUnitStatus: (unitId: string, status: Status) => void;
+  onUnitNotes: (unitId: string, notes: string) => void;
+  onDeleteUnit: (unitId: string) => void;
+  onBulkStatus: (ids: string[], status: Status) => void;
   onMove: () => void;
   onDelete: () => void;
   onCenter: () => void;
 }
 
-/**
- * An apartment building is one stop, marked like any other door.
- *
- * This deliberately does not break a complex into its individual units. A rep
- * standing outside a forty-door building wants to record that they worked it
- * and move on, not maintain a directory; a grid of unit numbers is a second job
- * nobody asked for, and every number in it would have to be kept true by hand.
- * What the building carries instead is a name and a note — which door to try,
- * the gate code, who manages it — because that is what is worth knowing next
- * time, and it survives whoever walks it.
- */
 export default function ComplexSheet({
   complex,
+  units,
   territoryName,
   onClose,
   onRename,
   onAddress,
   onNotes,
   onStatus,
+  onAddUnits,
+  onUnitStatus,
+  onUnitNotes,
+  onDeleteUnit,
+  onBulkStatus,
   onMove,
   onDelete,
   onCenter,
@@ -75,6 +112,10 @@ export default function ComplexSheet({
   const [name, setName] = useState(complex.name ?? "");
   const [address, setAddress] = useState(complex.address ?? "");
   const [notes, setNotes] = useState(complex.notes ?? "");
+  const [unitInput, setUnitInput] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [selectedUnitId, setSelectedUnitId] = useState<string | null>(null);
+  const [unitNote, setUnitNote] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   // Tapping a different building without closing the sheet reloads the fields.
@@ -85,6 +126,9 @@ export default function ComplexSheet({
     setName(complex.name ?? "");
     setAddress(complex.address ?? "");
     setNotes(complex.notes ?? "");
+    setUnitInput("");
+    setAdding(false);
+    setSelectedUnitId(null);
     setConfirmDelete(false);
   }, [complex]);
 
@@ -92,35 +136,59 @@ export default function ComplexSheet({
   useAutosave(address, complex.address ?? "", onAddress);
   const notesUnsaved = useAutosave(notes, complex.notes ?? "", onNotes);
 
-  const meta = STATUS_MAP[complex.status] ?? STATUS_MAP.not_knocked;
+  const selectedUnit = useMemo(
+    () => units.find((u) => u.id === selectedUnitId) ?? null,
+    [units, selectedUnitId]
+  );
+
+  // Switching doors has to reload the note, or the previous one gets pasted
+  // onto the next door the moment the autosave fires.
+  const unitIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const id = selectedUnit?.id ?? null;
+    if (unitIdRef.current === id) return;
+    unitIdRef.current = id;
+    setUnitNote(selectedUnit?.notes ?? "");
+  }, [selectedUnit]);
+
+  useAutosave(unitNote, selectedUnit?.notes ?? "", (value) => {
+    if (selectedUnit) onUnitNotes(selectedUnit.id, value);
+  });
+
+  const progress = complexProgress(units);
+
+  const parsed = useMemo(() => parseUnitLabels(unitInput), [unitInput]);
+  const existingLabels = useMemo(
+    () => new Set(units.map((u) => u.address.trim().toLowerCase())),
+    [units]
+  );
+  const freshLabels = parsed.labels.filter((l) => !existingLabels.has(l.toLowerCase()));
+  const duplicates = parsed.labels.length - freshLabels.length;
+
+  // Bulk actions never overwrite work somebody already recorded: closing a
+  // building only touches doors nobody has knocked, and reopening it only
+  // touches doors that were closed. Both directions are therefore reversible.
+  const untouched = units.filter((u) => u.status === "not_knocked");
+  const closed = units.filter((u) => u.status === "do_not_knock");
+
+  function commitUnits() {
+    if (freshLabels.length === 0) return;
+    onAddUnits(freshLabels);
+    setUnitInput("");
+    setAdding(false);
+  }
 
   return (
     <Sheet onClose={onClose}>
-      <div className="sheet-title">{complex.name || "Apartment building"}</div>
+      <div className="sheet-title">Apartment building</div>
       <div className="sheet-sub">
         {territoryName ? `${territoryName} · ` : ""}
-        <span style={{ color: meta.color, fontWeight: 700 }}>{meta.label}</span>
-        {complex.status !== "not_knocked" && complex.updated_by
-          ? ` · ${complex.updated_by}, ${relativeTime(complex.updated_at)}`
-          : ""}
-      </div>
-
-      <div className="section-label">Mark this building</div>
-      <div className="status-grid">
-        {STATUSES.map((s) => {
-          const active = s.id === complex.status;
-          return (
-            <button
-              key={s.id}
-              className={`status-btn${active ? " is-active" : ""}`}
-              style={active ? { color: s.color } : undefined}
-              onClick={() => onStatus(s.id)}
-            >
-              <span className="legend-swatch" style={{ background: s.color }} />
-              <span style={{ color: "var(--ink)" }}>{s.label}</span>
-            </button>
-          );
-        })}
+        {units.length === 0
+          ? "No doors listed yet"
+          : progress.total === 0
+            ? `${units.length} doors · all off limits`
+            : `${progress.worked} of ${progress.total} doors worked` +
+              (progress.excluded > 0 ? ` · ${progress.excluded} off limits` : "")}
       </div>
 
       <div className="section-label">
@@ -143,18 +211,196 @@ export default function ComplexSheet({
       />
 
       <div className="section-label">
-        Notes
+        Doors
+        {units.length > 0 && <span className="label-hint">{units.length} listed</span>}
+      </div>
+
+      {units.length === 0 && !adding && (
+        <div className="empty">
+          {/* Both paths are real, so say so. Left empty, the building is one
+              stop marked with the buttons below; listed, the doors become the
+              work and the building stops counting as a door of its own. */}
+          None listed. Leave this empty to track the building as a single stop, or list its
+          doors once and everyone on the team can mark them one by one.
+        </div>
+      )}
+
+      {units.length > 0 && (
+        <div className="unit-grid">
+          {units.map((u) => {
+            const meta = STATUS_MAP[u.status] ?? STATUS_MAP.not_knocked;
+            const active = u.id === selectedUnitId;
+            return (
+              <button
+                key={u.id}
+                className={`unit-chip${active ? " is-active" : ""}`}
+                style={{
+                  borderColor: meta.color,
+                  background: `color-mix(in srgb, ${meta.color} 12%, #fff)`,
+                }}
+                onClick={() => setSelectedUnitId(active ? null : u.id)}
+                title={`${u.address} — ${meta.label}`}
+              >
+                <span className="unit-chip-label">{u.address || "?"}</span>
+                {u.notes?.trim() ? <span className="unit-chip-note" /> : null}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {selectedUnit && (
+        <div className="unit-detail">
+          <div className="unit-detail-head">
+            <strong>{selectedUnit.address || "This door"}</strong>
+            <button
+              className="btn btn-danger btn-tiny"
+              onClick={() => {
+                onDeleteUnit(selectedUnit.id);
+                setSelectedUnitId(null);
+              }}
+              aria-label={`Remove door ${selectedUnit.address}`}
+            >
+              <IconTrash size={14} />
+            </button>
+          </div>
+          <div className="status-grid is-compact">
+            {STATUSES.map((s) => {
+              const active = s.id === selectedUnit.status;
+              return (
+                <button
+                  key={s.id}
+                  className={`status-btn${active ? " is-active" : ""}`}
+                  style={active ? { color: s.color } : undefined}
+                  onClick={() => onUnitStatus(selectedUnit.id, s.id)}
+                >
+                  <span className="legend-swatch" style={{ background: s.color }} />
+                  <span style={{ color: "var(--ink)" }}>{s.short}</span>
+                </button>
+              );
+            })}
+          </div>
+          <input
+            className="field"
+            style={{ marginTop: 8 }}
+            value={unitNote}
+            onChange={(e) => setUnitNote(e.target.value)}
+            placeholder="Note for this door"
+          />
+        </div>
+      )}
+
+      {adding ? (
+        <div className="unit-add">
+          <input
+            className="field"
+            value={unitInput}
+            onChange={(e) => setUnitInput(e.target.value)}
+            placeholder="101-124, 201-224"
+            autoFocus
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commitUnits();
+            }}
+          />
+          <div className="field-help">
+            Ranges, lists, or plain names — <strong>101-124</strong>, <strong>1 to 12</strong>,{" "}
+            <strong>A, B, Basement</strong>.
+            {parsed.labels.length > 0 && (
+              <>
+                {" "}
+                Adds <strong>{freshLabels.length}</strong> door
+                {freshLabels.length === 1 ? "" : "s"}
+                {duplicates > 0 ? ` (${duplicates} already listed)` : ""}.
+                {parsed.truncated ? ` Capped at ${MAX_NEW_UNITS} at a time.` : ""}
+              </>
+            )}
+          </div>
+          <div className="row" style={{ marginTop: 8 }}>
+            <button
+              className="btn btn-primary grow"
+              onClick={commitUnits}
+              disabled={freshLabels.length === 0}
+            >
+              <IconPlus size={16} /> Add {freshLabels.length || ""} door
+              {freshLabels.length === 1 ? "" : "s"}
+            </button>
+            <button className="btn btn-quiet" onClick={() => setAdding(false)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          className="btn btn-quiet btn-block"
+          style={{ marginTop: 10 }}
+          onClick={() => setAdding(true)}
+        >
+          <IconPlus size={16} /> Add doors
+        </button>
+      )}
+
+      {/* With no doors listed, the building is one stop and carries its own
+          status. Once doors exist they are the work, and a status on the
+          building itself would be a second, contradictory answer. */}
+      {units.length === 0 && (
+        <>
+          <div className="section-label">Mark this building</div>
+          <div className="status-grid is-compact">
+            {STATUSES.map((s) => {
+              const active = s.id === complex.status;
+              return (
+                <button
+                  key={s.id}
+                  className={`status-btn${active ? " is-active" : ""}`}
+                  style={active ? { color: s.color } : undefined}
+                  onClick={() => onStatus(s.id)}
+                >
+                  <span className="legend-swatch" style={{ background: s.color }} />
+                  <span style={{ color: "var(--ink)" }}>{s.short}</span>
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {units.length > 0 && (untouched.length > 0 || closed.length > 0) && (
+        <>
+          <div className="section-label">Whole building</div>
+          {untouched.length > 0 && (
+            <button
+              className="btn btn-quiet btn-block"
+              onClick={() => onBulkStatus(untouched.map((u) => u.id), "do_not_knock")}
+            >
+              Close {untouched.length} unknocked door{untouched.length === 1 ? "" : "s"} — no
+              soliciting
+            </button>
+          )}
+          {closed.length > 0 && (
+            <button
+              className="btn btn-quiet btn-block"
+              style={{ marginTop: 8 }}
+              onClick={() => onBulkStatus(closed.map((u) => u.id), "not_knocked")}
+            >
+              Reopen {closed.length} closed door{closed.length === 1 ? "" : "s"}
+            </button>
+          )}
+          <p className="field-help" style={{ marginTop: 6 }}>
+            Neither button touches a door somebody has already marked.
+          </p>
+        </>
+      )}
+
+      <div className="section-label">
+        Building notes
         <span className="label-hint">{notesUnsaved ? "saving…" : "saves as you type"}</span>
       </div>
       <textarea
         className="notes"
         value={notes}
         onChange={(e) => setNotes(e.target.value)}
-        rows={4}
-        placeholder={
-          "Anything worth knowing next time.\n" +
-          "Gate code · buzzer at the north door · manager in 101 · no soliciting sign"
-        }
+        rows={3}
+        placeholder={"Gate code · who manages it · best time for this block"}
       />
 
       <div className="row" style={{ marginTop: 14 }}>
@@ -166,7 +412,8 @@ export default function ComplexSheet({
         </button>
         {confirmDelete ? (
           <button className="btn btn-danger grow" onClick={onDelete}>
-            <IconTrash size={16} /> Really delete?
+            <IconTrash size={16} /> Delete building
+            {units.length > 0 ? ` + ${units.length} doors` : ""}?
           </button>
         ) : (
           <button
@@ -178,16 +425,6 @@ export default function ComplexSheet({
           </button>
         )}
       </div>
-
-      <p className="meta-line">
-        {complex.status === "not_knocked"
-          ? `Added ${relativeTime(complex.updated_at)}${
-              complex.updated_by ? ` by ${complex.updated_by}` : ""
-            }`
-          : `Last marked ${relativeTime(complex.updated_at)}${
-              complex.updated_by ? ` by ${complex.updated_by}` : ""
-            }`}
-      </p>
     </Sheet>
   );
 }
