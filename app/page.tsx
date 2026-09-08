@@ -4,11 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 
 import Gate from "@/components/Gate";
+import ComplexSheet from "@/components/ComplexSheet";
 import HouseSheet from "@/components/HouseSheet";
 import SaveTerritorySheet from "@/components/SaveTerritorySheet";
 import TerritorySheet from "@/components/TerritorySheet";
 import LocationSheet, { type LocationSheetMode } from "@/components/LocationSheet";
 import {
+  IconBuilding,
   IconCheck,
   IconDoor,
   IconLasso,
@@ -32,13 +34,15 @@ import {
   wasDenied,
 } from "@/lib/geolocation";
 import { isCloudMode } from "@/lib/supabase";
-import { distanceM, pointInPolygon, simplify } from "@/lib/geo";
+import { distanceM, pointInPolygon, simplify, smallestContaining } from "@/lib/geo";
 import { fetchHousesInPolygon } from "@/lib/overpass";
 import {
   STATUSES,
   STATUS_MAP,
   TERRITORY_COLORS,
   isExcluded,
+  type House,
+  type HouseKind,
   type LatLng,
   type Status,
   type Territory,
@@ -76,6 +80,10 @@ export default function Page() {
 
   const [activeTerritoryId, setActiveTerritoryId] = useState<string | null>(null);
   const [selectedHouseId, setSelectedHouseId] = useState<string | null>(null);
+  /** What the next map tap drops while in "add" mode. */
+  const [addKind, setAddKind] = useState<Extract<HouseKind, "house" | "complex">>("house");
+  /** The pin waiting for a new location while in "move" mode. */
+  const [moveTargetId, setMoveTargetId] = useState<string | null>(null);
   const [showTerritories, setShowTerritories] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [locationSheet, setLocationSheet] = useState<LocationSheetMode | null>(null);
@@ -215,20 +223,36 @@ export default function Page() {
     return map;
   }, [data.territories]);
 
+  /**
+   * An apartment building with doors listed is a container for them, not a door
+   * of its own: counting both would add a phantom knock per building. One with
+   * no doors listed yet is a single stop and counts normally.
+   */
+  const isContainer = useCallback(
+    (h: House) => h.kind === "complex" && (data.unitsByComplex.get(h.id)?.length ?? 0) > 0,
+    [data.unitsByComplex]
+  );
+
   const statsFor = useCallback(
     (id: string) => {
       const list = data.housesByTerritory.get(id) ?? [];
+      let total = 0;
       let worked = 0;
       let excluded = 0;
       for (const h of list) {
-        if (isExcluded(h.status)) excluded++;
-        else if (STATUS_MAP[h.status]?.worked) worked++;
+        if (isContainer(h)) continue;
+        // Off-limits doors leave the denominator entirely, so a finished
+        // territory actually reaches 100%.
+        if (isExcluded(h.status)) {
+          excluded++;
+          continue;
+        }
+        total++;
+        if (STATUS_MAP[h.status]?.worked) worked++;
       }
-      // Off-limits doors leave the denominator entirely, so a finished
-      // territory actually reaches 100%.
-      return { total: list.length - excluded, worked, excluded };
+      return { total, worked, excluded };
     },
-    [data.housesByTerritory]
+    [data.housesByTerritory, isContainer]
   );
 
   const activeTerritory = activeTerritoryId ? territoryById.get(activeTerritoryId) ?? null : null;
@@ -237,17 +261,25 @@ export default function Page() {
     if (!activeTerritoryId) return null;
     const list = data.housesByTerritory.get(activeTerritoryId) ?? [];
     const counts = new Map<Status, number>();
-    for (const h of list) counts.set(h.status, (counts.get(h.status) ?? 0) + 1);
-    const worked = STATUSES.filter((s) => s.worked).reduce(
-      (sum, s) => sum + (counts.get(s.id) ?? 0),
-      0
-    );
-    const excluded = STATUSES.filter((s) => s.excluded).reduce(
-      (sum, s) => sum + (counts.get(s.id) ?? 0),
-      0
-    );
-    return { counts, worked, excluded, total: list.length - excluded };
-  }, [activeTerritoryId, data.housesByTerritory]);
+    let total = 0;
+    let worked = 0;
+    let excluded = 0;
+    let buildings = 0;
+    for (const h of list) {
+      if (isContainer(h)) {
+        buildings++;
+        continue;
+      }
+      counts.set(h.status, (counts.get(h.status) ?? 0) + 1);
+      if (isExcluded(h.status)) {
+        excluded++;
+        continue;
+      }
+      total++;
+      if (STATUS_MAP[h.status]?.worked) worked++;
+    }
+    return { counts, worked, excluded, total, buildings };
+  }, [activeTerritoryId, data.housesByTerritory, isContainer]);
 
   const selectedHouse = useMemo(
     () => data.houses.find((h) => h.id === selectedHouseId) ?? null,
@@ -360,11 +392,33 @@ export default function Page() {
   // ---- house interactions -------------------------------------------------
   const handleMapTap = useCallback(
     async (point: LatLng) => {
+      // Repositioning an existing pin, usually a building dropped from a
+      // printed map onto roughly the right block.
+      if (mode === "move" && moveTargetId) {
+        const target = data.houses.find((h) => h.id === moveTargetId);
+        const to = { lat: point[0], lng: point[1] };
+        data.updateHouse(moveTargetId, to);
+        // Every door inside a building shares its coordinates, so they travel
+        // with it — otherwise the units stay behind at the old spot.
+        const units = data.unitsByComplex.get(moveTargetId) ?? [];
+        if (units.length > 0) data.updateHouses(units.map((u) => u.id), to);
+        setMode("idle");
+        setMoveTargetId(null);
+        setSelectedHouseId(moveTargetId);
+        pushToast(`${target?.name || target?.address || "Pin"} moved.`, "ok");
+        return;
+      }
+
       const containing =
-        data.territories.find((t) => pointInPolygon(point, t.polygon)) ??
+        smallestContaining(point, data.territories) ??
         (activeTerritory && pointInPolygon(point, activeTerritory.polygon) ? activeTerritory : null);
 
-      const near = data.houses.find((h) => distanceM([h.lat, h.lng], point) < DEDUPE_RADIUS_M);
+      // Dedupe against pins of the same kind only. A building often stands a
+      // few metres from a front door, and tapping there should not silently
+      // open that house instead of placing the building.
+      const near = data.houses.find(
+        (h) => h.kind === addKind && distanceM([h.lat, h.lng], point) < DEDUPE_RADIUS_M
+      );
       if (near) {
         setSelectedHouseId(near.id);
         setMode("idle");
@@ -373,18 +427,25 @@ export default function Page() {
 
       try {
         const [created] = await data.addHouses([
-          { territory_id: containing?.id ?? null, lat: point[0], lng: point[1], address: "" },
+          {
+            territory_id: containing?.id ?? null,
+            lat: point[0],
+            lng: point[1],
+            address: "",
+            kind: addKind,
+          },
         ]);
         if (created) setSelectedHouseId(created.id);
         setMode("idle");
       } catch (err) {
+        const what = addKind === "complex" ? "that building" : "that house";
         pushToast(
-          err instanceof Error ? `Could not add that house: ${err.message}` : "Could not add that house.",
+          err instanceof Error ? `Could not add ${what}: ${err.message}` : `Could not add ${what}.`,
           "err"
         );
       }
     },
-    [data, activeTerritory, pushToast]
+    [data, activeTerritory, addKind, mode, moveTargetId, pushToast]
   );
 
   const setStatus = useCallback(
@@ -398,10 +459,28 @@ export default function Page() {
   // ---- export -------------------------------------------------------------
   const exportCsv = useCallback(() => {
     const escape = (value: string) => `"${(value ?? "").replace(/"/g, '""')}"`;
+    // Units carry only their door number, so the building name has to travel
+    // with them or the spreadsheet is full of bare "101"s from nowhere.
+    const buildings = new Map(
+      data.houses.filter((h) => h.kind === "complex").map((h) => [h.id, h.name || h.address])
+    );
     const rows = [
-      ["Territory", "Address", "Status", "Notes", "Updated by", "Updated at", "Latitude", "Longitude"],
+      [
+        "Territory",
+        "Type",
+        "Building",
+        "Address",
+        "Status",
+        "Notes",
+        "Updated by",
+        "Updated at",
+        "Latitude",
+        "Longitude",
+      ],
       ...data.houses.map((h) => [
         territoryById.get(h.territory_id ?? "")?.name ?? "",
+        h.kind === "complex" ? "Building" : h.kind === "unit" ? "Unit" : "House",
+        h.kind === "unit" ? (buildings.get(h.parent_id ?? "") ?? "") : h.kind === "complex" ? h.name : "",
         h.address,
         STATUS_MAP[h.status]?.label ?? h.status,
         h.notes ?? "",
@@ -485,6 +564,7 @@ export default function Page() {
           basemap={basemap}
           territories={data.territories}
           houses={data.houses}
+          unitsByComplex={data.unitsByComplex}
           activeTerritoryId={activeTerritoryId}
           selectedHouseId={selectedHouseId}
           onDrawProgress={setDrawCount}
@@ -528,6 +608,11 @@ export default function Page() {
                       (activeBreakdown.excluded > 0
                         ? ` · ${activeBreakdown.excluded} off limits`
                         : "")}
+                {activeBreakdown.buildings > 0
+                  ? ` · ${activeBreakdown.buildings} building${
+                      activeBreakdown.buildings === 1 ? "" : "s"
+                    }`
+                  : ""}
               </div>
               {(activeBreakdown.total > 0 || activeBreakdown.excluded > 0) && (
                 <>
@@ -579,13 +664,13 @@ export default function Page() {
         )}
 
         {/* right-hand controls */}
-        {mode !== "draw" && (
+        {mode !== "draw" && mode !== "move" && (
           <div className="map-controls">
             <button
               className={`fab${mode === "add" ? " is-on" : ""}`}
               onClick={() => setMode(mode === "add" ? "idle" : "add")}
-              title={mode === "add" ? "Cancel adding" : "Tap the map to add a house"}
-              aria-label="Add a house by tapping the map"
+              title={mode === "add" ? "Cancel adding" : "Tap the map to add a house or a building"}
+              aria-label="Add a house or apartment building by tapping the map"
             >
               {mode === "add" ? <IconX size={20} /> : <IconPlus />}
             </button>
@@ -622,10 +707,54 @@ export default function Page() {
         {/* add-house hint */}
         {mode === "add" && (
           <div className="draw-bar">
-            <div className="draw-hint">Tap anywhere on the map to drop a house.</div>
+            <div className="draw-hint">
+              {addKind === "house"
+                ? "Tap anywhere on the map to drop a house."
+                : "Tap the building on the map. You can name it and list its doors next."}
+            </div>
+            {/* The choice sits inside the toolbar rather than behind a second
+                FAB: a rep adding a building is already in add mode, and a
+                separate button would be one more thing to find. */}
+            <div className="seg" role="group" aria-label="What to add">
+              <button
+                className={`seg-btn${addKind === "house" ? " is-on" : ""}`}
+                onClick={() => setAddKind("house")}
+                aria-pressed={addKind === "house"}
+              >
+                <IconDoor size={15} /> House
+              </button>
+              <button
+                className={`seg-btn${addKind === "complex" ? " is-on" : ""}`}
+                onClick={() => setAddKind("complex")}
+                aria-pressed={addKind === "complex"}
+              >
+                <IconBuilding size={15} /> Apartments
+              </button>
+            </div>
             <div className="draw-actions">
               <button className="btn btn-ghost-dark btn-block" onClick={() => setMode("idle")}>
                 Done
+              </button>
+            </div>
+          </div>
+        )}
+
+        {mode === "move" && (
+          <div className="draw-bar">
+            <div className="draw-hint">
+              Tap where this building really is. Its doors move with it.
+            </div>
+            <div className="draw-actions">
+              <button
+                className="btn btn-ghost-dark btn-block"
+                onClick={() => {
+                  const id = moveTargetId;
+                  setMode("idle");
+                  setMoveTargetId(null);
+                  setSelectedHouseId(id);
+                }}
+              >
+                Cancel
               </button>
             </div>
           </div>
@@ -719,7 +848,61 @@ export default function Page() {
         />
       )}
 
-      {selectedHouse && (
+      {selectedHouse && selectedHouse.kind === "complex" && mode !== "move" && (
+        <ComplexSheet
+          complex={selectedHouse}
+          units={data.unitsByComplex.get(selectedHouse.id) ?? []}
+          territoryName={territoryById.get(selectedHouse.territory_id ?? "")?.name ?? null}
+          onClose={() => setSelectedHouseId(null)}
+          onRename={(name) => data.updateHouse(selectedHouse.id, { name })}
+          onAddress={(address) => data.updateHouse(selectedHouse.id, { address })}
+          onNotes={(notes) => data.updateHouse(selectedHouse.id, { notes })}
+          onStatus={setStatus}
+          onAddUnits={async (labels) => {
+            try {
+              await data.addHouses(
+                labels.map((label) => ({
+                  // Units inherit the building's territory and coordinates, so
+                  // they land in the right area stats and travel with the pin.
+                  territory_id: selectedHouse.territory_id,
+                  lat: selectedHouse.lat,
+                  lng: selectedHouse.lng,
+                  address: label,
+                  kind: "unit" as const,
+                  parent_id: selectedHouse.id,
+                }))
+              );
+              pushToast(
+                `Added ${labels.length} door${labels.length === 1 ? "" : "s"} to ${
+                  selectedHouse.name || "this building"
+                }.`,
+                "ok"
+              );
+            } catch (err) {
+              pushToast(
+                err instanceof Error ? `Could not add those doors: ${err.message}` : "Could not add those doors.",
+                "err"
+              );
+            }
+          }}
+          onUnitStatus={(unitId, status) => data.updateHouse(unitId, { status })}
+          onUnitNotes={(unitId, notes) => data.updateHouse(unitId, { notes })}
+          onDeleteUnit={(unitId) => data.deleteHouse(unitId)}
+          onBulkStatus={(ids, status) => data.updateHouses(ids, { status })}
+          onMove={() => {
+            setMoveTargetId(selectedHouse.id);
+            setSelectedHouseId(null);
+            setMode("move");
+          }}
+          onDelete={() => {
+            data.deleteHouse(selectedHouse.id);
+            setSelectedHouseId(null);
+          }}
+          onCenter={() => mapRef.current?.panTo(selectedHouse.lat, selectedHouse.lng)}
+        />
+      )}
+
+      {selectedHouse && selectedHouse.kind !== "complex" && (
         <HouseSheet
           house={selectedHouse}
           territoryName={territoryById.get(selectedHouse.territory_id ?? "")?.name ?? null}

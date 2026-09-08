@@ -36,6 +36,38 @@ create index if not exists houses_team_idx      on public.houses (team_code);
 create index if not exists houses_territory_idx on public.houses (territory_id);
 
 -- ---------------------------------------------------------------------------
+-- Apartment buildings
+--
+-- A complex is one pin standing for many doors, and each of those doors is an
+-- ordinary house row pointed back at it by parent_id. Reusing this table
+-- rather than adding a second one means units inherit everything already built
+-- and proven here: the team-scoped policies below, realtime, the offline retry
+-- queue, paging, and the CSV export.
+--
+--   kind = 'house'    a single front door, and what every existing row is
+--        = 'complex'  the building itself; carries the name and the map pin
+--        = 'unit'     one door inside a complex; never drawn on the map,
+--                     because every unit shares its building's coordinates
+--
+-- The self-referencing cascade is what makes deleting a building take its
+-- units with it instead of orphaning them at the same coordinates forever.
+-- ---------------------------------------------------------------------------
+
+alter table public.houses add column if not exists kind      text not null default 'house';
+alter table public.houses add column if not exists parent_id text;
+alter table public.houses add column if not exists name      text not null default '';
+
+do $$
+begin
+  alter table public.houses
+    add constraint houses_parent_fk foreign key (parent_id)
+    references public.houses (id) on delete cascade;
+exception when duplicate_object then null;
+end $$;
+
+create index if not exists houses_parent_idx on public.houses (parent_id);
+
+-- ---------------------------------------------------------------------------
 -- Access rules
 --
 -- The anon key is baked into the public JavaScript bundle, so row-level

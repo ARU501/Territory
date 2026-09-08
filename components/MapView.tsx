@@ -3,7 +3,7 @@
 import { useEffect, useImperativeHandle, useRef, type MutableRefObject } from "react";
 import L from "leaflet";
 import type { House, LatLng, Territory } from "@/lib/types";
-import { STATUS_MAP } from "@/lib/types";
+import { STATUS_MAP, complexProgress } from "@/lib/types";
 import {
   describeLocationError,
   getPermissionState,
@@ -11,7 +11,7 @@ import {
   type LocationFailure,
 } from "@/lib/geolocation";
 
-export type MapMode = "idle" | "draw" | "add";
+export type MapMode = "idle" | "draw" | "add" | "move";
 export type Basemap = "street" | "satellite";
 
 export interface MapHandle {
@@ -33,6 +33,8 @@ interface MapViewProps {
   basemap: Basemap;
   territories: Territory[];
   houses: House[];
+  /** The doors inside each apartment building, keyed by the building's id. */
+  unitsByComplex: Map<string, House[]>;
   activeTerritoryId: string | null;
   selectedHouseId: string | null;
   onDrawProgress: (pointCount: number) => void;
@@ -62,6 +64,61 @@ const LABELS_URL =
 
 /** Below this zoom a full territory can be thousands of dots; draw it as one shape instead. */
 const MARKER_MIN_ZOOM = 15;
+
+/**
+ * Buildings stay on screen four zoom levels further out than house dots.
+ *
+ * One pin can stand for eighty doors, so a rep needs to see that a complex is
+ * over there from much further away than they can read a street name — and
+ * there are a handful of them per territory, not ten thousand.
+ */
+const COMPLEX_MIN_ZOOM = 12;
+
+/** How a building reads at a glance: untouched, part-done, finished, off limits. */
+function complexTone(house: House, units: House[]): { color: string; count: string } {
+  if (units.length === 0) {
+    const meta = STATUS_MAP[house.status] ?? STATUS_MAP.not_knocked;
+    return { color: meta.color, count: "" };
+  }
+  const { total, worked, excluded } = complexProgress(units);
+  if (total === 0) return { color: "#1f2937", count: `${excluded} off limits` };
+  const color = worked >= total ? "#22c55e" : worked > 0 ? "#f59e0b" : "#64748b";
+  return { color, count: `${worked}/${total}` };
+}
+
+/**
+ * Built as DOM rather than an HTML string: building names are typed by reps,
+ * and interpolating one into innerHTML would run whatever it contained.
+ */
+function complexPin(house: House, units: House[], selected: boolean): HTMLElement {
+  const { color, count } = complexTone(house, units);
+
+  const root = document.createElement("div");
+  root.style.setProperty("--pin", color);
+
+  const chip = document.createElement("div");
+  chip.className = `complex-chip${selected ? " is-selected" : ""}`;
+
+  const name = document.createElement("span");
+  name.className = "complex-chip-name";
+  name.textContent = house.name || house.address || "Apartments";
+  chip.appendChild(name);
+
+  if (count) {
+    const badge = document.createElement("span");
+    badge.className = "complex-chip-count";
+    badge.textContent = count;
+    chip.appendChild(badge);
+  }
+
+  const stem = document.createElement("span");
+  stem.className = "complex-stem";
+  const dot = document.createElement("span");
+  dot.className = "complex-dot";
+
+  root.append(chip, stem, dot);
+  return root;
+}
 
 /** City blocks put houses ~10 m apart, so dots have to shrink as you zoom out. */
 function markerRadius(zoom: number): number {
@@ -114,6 +171,7 @@ export default function MapView(props: MapViewProps) {
   const labelLayerRef = useRef<L.TileLayer | null>(null);
   const territoryLayerRef = useRef<L.LayerGroup | null>(null);
   const houseLayerRef = useRef<L.LayerGroup | null>(null);
+  const complexLayerRef = useRef<L.LayerGroup | null>(null);
   const drawLayerRef = useRef<L.LayerGroup | null>(null);
   const meLayerRef = useRef<L.LayerGroup | null>(null);
 
@@ -149,17 +207,23 @@ export default function MapView(props: MapViewProps) {
 
     territoryLayerRef.current = L.layerGroup().addTo(map);
     houseLayerRef.current = L.layerGroup().addTo(map);
+    complexLayerRef.current = L.layerGroup().addTo(map);
     drawLayerRef.current = L.layerGroup().addTo(map);
     meLayerRef.current = L.layerGroup().addTo(map);
 
     map.on("click", (e: L.LeafletMouseEvent) => {
-      if (propsRef.current.mode === "add") {
+      const { mode } = propsRef.current;
+      // "move" repositions an existing pin; the page decides which one.
+      if (mode === "add" || mode === "move") {
         propsRef.current.onMapTap([e.latlng.lat, e.latlng.lng]);
       }
     });
 
     // Markers are culled to the visible bounds, so panning needs a repaint too.
-    map.on("moveend", () => renderHouses());
+    map.on("moveend", () => {
+      renderHouses();
+      renderComplexes();
+    });
 
     // React Strict Mode mounts, unmounts and remounts; anything asynchronous
     // has to check that its map still exists before touching it.
@@ -285,6 +349,10 @@ export default function MapView(props: MapViewProps) {
     const stroke = zoom >= 17 ? 2 : 1;
 
     for (const h of houses) {
+      // Buildings get their own labelled pins below, and every unit sits at
+      // exactly its building's coordinates — drawn here they would be one dot
+      // hiding eighty others, and the top one would win every tap.
+      if (h.kind !== "house") continue;
       if (!bounds.contains([h.lat, h.lng])) continue;
       wanted.add(h.id);
 
@@ -330,10 +398,49 @@ export default function MapView(props: MapViewProps) {
     }
   }
 
+  // ---- apartment buildings ------------------------------------------------
+  function renderComplexes() {
+    const map = mapRef.current;
+    const layer = complexLayerRef.current;
+    if (!map || !layer) return;
+
+    const { houses, unitsByComplex, selectedHouseId, activeTerritoryId } = propsRef.current;
+    layer.clearLayers();
+    if (map.getZoom() < COMPLEX_MIN_ZOOM) return;
+
+    const bounds = map.getBounds().pad(0.5);
+    for (const h of houses) {
+      if (h.kind !== "complex") continue;
+      if (!bounds.contains([h.lat, h.lng])) continue;
+
+      const units = unitsByComplex.get(h.id) ?? [];
+      const marker = L.marker([h.lat, h.lng], {
+        icon: L.divIcon({
+          className: "complex-marker",
+          html: complexPin(h, units, h.id === selectedHouseId),
+          iconSize: [0, 0],
+        }),
+        // Above the house dots: a building is the bigger prize on the street,
+        // and its label would otherwise be interrupted by pins drawn over it.
+        zIndexOffset: 1000,
+        opacity: activeTerritoryId !== null && h.territory_id !== activeTerritoryId ? 0.55 : 1,
+        keyboard: false,
+      });
+      marker.on("click", (e) => {
+        if (propsRef.current.mode === "draw") return;
+        L.DomEvent.stop(e);
+        const current = propsRef.current.houses.find((x) => x.id === h.id);
+        if (current) propsRef.current.onHouseClick(current);
+      });
+      marker.addTo(layer);
+    }
+  }
+
   useEffect(() => {
     renderHouses();
+    renderComplexes();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.houses, props.selectedHouseId, props.activeTerritoryId]);
+  }, [props.houses, props.unitsByComplex, props.selectedHouseId, props.activeTerritoryId]);
 
   // ---- freehand / tap drawing --------------------------------------------
   useEffect(() => {

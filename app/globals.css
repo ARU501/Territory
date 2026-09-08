@@ -930,3 +930,195 @@ input.field {
   color: var(--ink-3);
   line-height: 1.5;
 }
+
+/* ---------- apartment buildings ---------- */
+
+/* One pin can stand for eighty doors, so a building is labelled on the map
+   rather than reduced to another coloured dot among thousands. */
+.leaflet-div-icon.complex-marker {
+  background: transparent;
+  border: none;
+}
+
+.complex-chip {
+  position: absolute;
+  left: 0;
+  bottom: 10px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 190px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: #fff;
+  border: 2px solid var(--pin, #64748b);
+  box-shadow: var(--shadow-md);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.complex-chip.is-selected {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.15), var(--shadow-md);
+}
+
+.complex-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.complex-chip-count {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--pin, #64748b);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+
+.complex-stem {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 2px;
+  height: 10px;
+  transform: translateX(-50%);
+  background: var(--pin, #64748b);
+}
+
+.complex-dot {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  transform: translate(-50%, 50%);
+  background: var(--pin, #64748b);
+  border: 2px solid #fff;
+  box-shadow: var(--shadow-sm);
+}
+
+/* A hallway of doors: tappable at a walking pace, colour-coded like the map. */
+.unit-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  gap: 6px;
+  max-height: 34vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 2px;
+}
+
+.unit-chip {
+  position: relative;
+  min-height: 46px;
+  border-radius: 10px;
+  border: 1.5px solid var(--line);
+  background: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+}
+
+.unit-chip.is-active {
+  box-shadow: 0 0 0 2.5px rgba(15, 23, 42, 0.25);
+}
+
+.unit-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Matches the dark ring a note puts on a house pin. */
+.unit-chip-note {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink);
+}
+
+.unit-detail {
+  margin-top: 10px;
+  padding: 12px;
+  border: 1.5px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper-2);
+}
+
+.unit-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 15px;
+  margin-bottom: 10px;
+}
+
+.unit-add {
+  margin-top: 10px;
+}
+
+/* Six full-width buttons is a lot of scrolling inside a building, and the
+   short labels fit two across even on a small phone. */
+.status-grid.is-compact {
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.status-grid.is-compact .status-btn {
+  min-height: 48px;
+  padding: 10px 12px;
+  font-size: 14px;
+  gap: 8px;
+}
+
+.btn.btn-tiny {
+  min-height: 32px;
+  padding: 6px 10px;
+}
+
+/* House / Apartments picker inside the add toolbar. */
+.seg {
+  display: flex;
+  gap: 6px;
+  margin: 10px 0 2px;
+  padding: 4px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.seg-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 42px;
+  border-radius: 9px;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 14.5px;
+  font-weight: 650;
+}
+
+.seg-btn.is-on {
+  background: #fff;
+  color: var(--ink);
+  box-shadow: var(--shadow-sm);
+}

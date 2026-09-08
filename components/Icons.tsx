@@ -93,3 +93,19 @@ export const IconTarget = ({ size = 18, className }: IconProps) => (
     <path d="M15.5 4.5 20 4l-.5 4.5" />
   </svg>
 );
+
+export const IconBuilding = ({ size = 16, className }: IconProps) => (
+  <svg {...base(size)} className={className} aria-hidden="true">
+    <path d="M4 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16" />
+    <path d="M16 10h2a2 2 0 0 1 2 2v9" />
+    <path d="M2 21h20" />
+    <path d="M8 7h1M12 7h1M8 11h1M12 11h1M8 15h1M12 15h1" />
+  </svg>
+);
+
+export const IconMove = ({ size = 16, className }: IconProps) => (
+  <svg {...base(size)} className={className} aria-hidden="true">
+    <path d="M12 2v20M2 12h20" />
+    <path d="m9 5 3-3 3 3M9 19l3 3 3-3M5 9l-3 3 3 3M19 9l3 3-3 3" />
+  </svg>
+);

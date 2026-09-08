@@ -147,7 +147,7 @@ export default function TerritorySheet({
                             setConfirmId(null);
                           }}
                         >
-                          Delete area and its {statsFor(t.id).total + statsFor(t.id).excluded} houses
+                          Delete area and everything in it
                         </button>
                       ) : (
                         <button

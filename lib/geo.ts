@@ -46,6 +46,34 @@ export function polygonAreaSqM(polygon: LatLng[]): number {
   return Math.abs(area / 2);
 }
 
+/**
+ * Which drawn area a point belongs to when areas overlap.
+ *
+ * Areas nest in practice: an off-limits block sits inside the territory it was
+ * carved out of, and a worked grid sits inside the same one. Taking the first
+ * match means a new pin lands in whichever area the database happened to return
+ * first, so a house dropped inside a "do not knock" box can end up filed under
+ * the surrounding territory. The smallest containing area is always the one
+ * somebody drew deliberately around that spot.
+ */
+export function smallestContaining<T extends { polygon: LatLng[] }>(
+  point: LatLng,
+  areas: T[]
+): T | null {
+  let best: T | null = null;
+  let bestArea = Infinity;
+  for (const area of areas) {
+    if (!Array.isArray(area.polygon) || area.polygon.length < 3) continue;
+    if (!pointInPolygon(point, area.polygon)) continue;
+    const size = polygonAreaSqM(area.polygon);
+    if (size < bestArea) {
+      best = area;
+      bestArea = size;
+    }
+  }
+  return best;
+}
+
 /** Metres between two coordinates (haversine). */
 export function distanceM(a: LatLng, b: LatLng): number {
   const R = 6371000;
