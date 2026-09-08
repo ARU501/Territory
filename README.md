@@ -38,6 +38,27 @@ opening the house. Notes come out in the CSV export.
 
 Every mark is stamped with who did it and when.
 
+**Apartment buildings.** A complex is one pin standing for many doors. Hit **+**, switch to
+*Apartments*, tap the building, and give it a name — it draws as a labelled pin that stays
+visible much further out than house dots, because eighty doors are worth seeing from a
+block away.
+
+Then list its doors. The field takes ranges and lists the way people actually write them:
+`101-124`, `1 to 12`, `101-112, 201-212`, or plain names like `A, B, Basement`. Each door
+becomes its own tappable square in a grid, coloured by status, with its own note.
+
+Two things worth knowing:
+
+- A building with doors listed is a *container*, not a door. It is left out of the
+  territory count entirely, so eight buildings do not silently add eight phantom knocks.
+  A building with no doors listed yet is a single stop and counts as one.
+- The two whole-building buttons only touch doors nobody has marked. *Close* skips doors
+  already knocked, and *Reopen* only reverses doors that Close set. Both are safe to press
+  on a building somebody is halfway through.
+
+*Move pin* repositions a building and takes its doors with it — useful for buildings placed
+from a printed map rather than found in OpenStreetMap.
+
 **See progress.** The territory card shows *64 of 156 doors worked* with a colour breakdown,
 so nobody re-knocks a street that is already done.
 
@@ -188,6 +209,7 @@ components/
   MapView.tsx                 Leaflet map, freehand drawing, status-coloured pins
   Gate.tsx                    team code + name
   HouseSheet.tsx              mark a door, notes, address
+  ComplexSheet.tsx            apartment building: name, door grid, bulk actions
   TerritorySheet.tsx          territory list, progress, CSV export
   SaveTerritorySheet.tsx
 lib/
