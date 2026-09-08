@@ -33,13 +33,7 @@ interface PendingWrite {
  * can trust `h.kind` outright instead of defending against undefined everywhere.
  */
 function asHouse(row: House): House {
-  const kind = kindOf(row.kind);
-  return {
-    ...row,
-    kind,
-    parent_id: kind === "unit" ? (row.parent_id ?? null) : null,
-    name: row.name ?? "",
-  };
+  return { ...row, kind: kindOf(row.kind), name: row.name ?? "" };
 }
 
 function readSolo(team: string): SoloData {
@@ -140,8 +134,6 @@ export interface NewHouse {
   address: string;
   status?: Status;
   kind?: HouseKind;
-  /** Units carry the id of the complex they sit inside. */
-  parent_id?: string | null;
   /** A building name, for complexes. */
   name?: string;
 }
@@ -516,7 +508,6 @@ export function useCanvassData(
         updated_by: rep,
         updated_at: now,
         kind: h.kind ?? "house",
-        parent_id: h.kind === "unit" ? (h.parent_id ?? null) : null,
         name: h.name ?? "",
       }));
       if (rows.length === 0) return [];
@@ -582,49 +573,15 @@ export function useCanvassData(
     [rep, teamCode, persistLocal, report]
   );
 
-  /**
-   * Marks many doors at once — every unit in a building, in practice.
-   *
-   * One request rather than one per unit: a 40-door complex on a phone in a
-   * stairwell would otherwise be forty chances to fail. If it does fail the
-   * marks go into the same retry queue as a single tap, so nothing is lost.
-   */
-  const updateHouses = useCallback(
-    async (ids: string[], patch: HousePatch) => {
-      if (ids.length === 0) return;
-      const target = new Set(ids);
-      const full = { ...patch, updated_by: rep, updated_at: new Date().toISOString() };
-      const apply = (list: House[]) => list.map((h) => (target.has(h.id) ? { ...h, ...full } : h));
-      setHouses(apply);
-      persistLocal({ houses: apply(stateRef.current.houses) });
-
-      if (!isCloudMode) return;
-      const db = clientRef.current;
-      const err = db ? (await db.from("houses").update(full).in("id", ids)).error : true;
-      if (err) {
-        let count = 0;
-        for (const id of ids) count = queueWrite(teamCode, { id, patch: full });
-        setPendingCount(count);
-        if (db) report(`${ids.length} marks have not saved yet — kept on this phone and retrying.`);
-      }
-    },
-    [rep, teamCode, persistLocal, report]
-  );
-
   const deleteHouse = useCallback(
     async (id: string) => {
       const doomed = stateRef.current.houses.find((h) => h.id === id);
-      // Deleting a building takes its units with it. The database cascade does
-      // this server-side, but the map has to lose them in the same beat or the
-      // units linger as invisible rows inflating every count.
-      const gone = new Set([id]);
-      for (const h of stateRef.current.houses) if (h.parent_id === id) gone.add(h.id);
-      const next = stateRef.current.houses.filter((h) => !gone.has(h.id));
+      const next = stateRef.current.houses.filter((h) => h.id !== id);
       setHouses(next);
       persistLocal({ houses: next });
 
       // Drop any queued mark for a house that is being removed.
-      const queue = readPending(teamCode).filter((p) => !gone.has(p.id));
+      const queue = readPending(teamCode).filter((p) => p.id !== id);
       writePending(teamCode, queue);
       setPendingCount(queue.length);
 
@@ -652,33 +609,10 @@ export function useCanvassData(
     return map;
   }, [houses]);
 
-  /**
-   * The doors inside each apartment building, sorted the way they are numbered.
-   *
-   * Derived rather than stored as a count on the building: a teammate adding
-   * units over realtime, or an offline mark landing late, would otherwise leave
-   * a saved count disagreeing with the units actually present.
-   */
-  const unitsByComplex = useMemo(() => {
-    const map = new Map<string, House[]>();
-    for (const h of houses) {
-      if (h.kind !== "unit" || !h.parent_id) continue;
-      const list = map.get(h.parent_id);
-      if (list) list.push(h);
-      else map.set(h.parent_id, [h]);
-    }
-    // "101" before "1101" before "A2" — numeric where possible, so the grid
-    // reads like the building does rather than like a string sort.
-    const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
-    for (const list of map.values()) list.sort((a, b) => collator.compare(a.address, b.address));
-    return map;
-  }, [houses]);
-
   return {
     territories,
     houses,
     housesByTerritory,
-    unitsByComplex,
     loading,
     sync,
     error,
@@ -688,7 +622,6 @@ export function useCanvassData(
     deleteTerritory,
     addHouses,
     updateHouse,
-    updateHouses,
     deleteHouse,
   };
 }

@@ -170,8 +170,8 @@ try {
     await client.query(
       `insert into public.houses
          (id, team_code, territory_id, lat, lng, address, status, notes,
-          updated_by, updated_at, kind, parent_id, name)
-       values ($1,$2,$3,$4,$5,'',$6,$7,'map import',$8,'complex',null,$9)`,
+          updated_by, updated_at, kind, name)
+       values ($1,$2,$3,$4,$5,'',$6,$7,'map import',$8,'complex',$9)`,
       [randomUUID(), team, p.territory_id, p.lat, p.lng, p.status, notes, now, p.name]
     );
   }

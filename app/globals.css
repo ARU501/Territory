@@ -971,17 +971,6 @@ input.field {
   text-overflow: ellipsis;
 }
 
-.complex-chip-count {
-  flex: none;
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: var(--pin, #64748b);
-  color: #fff;
-  font-size: 10.5px;
-  font-weight: 800;
-  letter-spacing: 0.01em;
-}
-
 .complex-stem {
   position: absolute;
   left: 0;
@@ -1005,92 +994,6 @@ input.field {
   box-shadow: var(--shadow-sm);
 }
 
-/* A hallway of doors: tappable at a walking pace, colour-coded like the map. */
-.unit-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
-  gap: 6px;
-  max-height: 34vh;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  padding: 2px;
-}
-
-.unit-chip {
-  position: relative;
-  min-height: 46px;
-  border-radius: 10px;
-  border: 1.5px solid var(--line);
-  background: #fff;
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--ink);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 4px;
-}
-
-.unit-chip.is-active {
-  box-shadow: 0 0 0 2.5px rgba(15, 23, 42, 0.25);
-}
-
-.unit-chip-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Matches the dark ring a note puts on a house pin. */
-.unit-chip-note {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--ink);
-}
-
-.unit-detail {
-  margin-top: 10px;
-  padding: 12px;
-  border: 1.5px solid var(--line);
-  border-radius: 12px;
-  background: var(--paper-2);
-}
-
-.unit-detail-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  font-size: 15px;
-  margin-bottom: 10px;
-}
-
-.unit-add {
-  margin-top: 10px;
-}
-
-/* Six full-width buttons is a lot of scrolling inside a building, and the
-   short labels fit two across even on a small phone. */
-.status-grid.is-compact {
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-}
-
-.status-grid.is-compact .status-btn {
-  min-height: 48px;
-  padding: 10px 12px;
-  font-size: 14px;
-  gap: 8px;
-}
-
-.btn.btn-tiny {
-  min-height: 32px;
-  padding: 6px 10px;
-}
 
 /* House / Apartments picker inside the add toolbar. */
 .seg {

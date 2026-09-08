@@ -41,7 +41,6 @@ import {
   STATUS_MAP,
   TERRITORY_COLORS,
   isExcluded,
-  type House,
   type HouseKind,
   type LatLng,
   type Status,
@@ -223,16 +222,6 @@ export default function Page() {
     return map;
   }, [data.territories]);
 
-  /**
-   * An apartment building with doors listed is a container for them, not a door
-   * of its own: counting both would add a phantom knock per building. One with
-   * no doors listed yet is a single stop and counts normally.
-   */
-  const isContainer = useCallback(
-    (h: House) => h.kind === "complex" && (data.unitsByComplex.get(h.id)?.length ?? 0) > 0,
-    [data.unitsByComplex]
-  );
-
   const statsFor = useCallback(
     (id: string) => {
       const list = data.housesByTerritory.get(id) ?? [];
@@ -240,7 +229,6 @@ export default function Page() {
       let worked = 0;
       let excluded = 0;
       for (const h of list) {
-        if (isContainer(h)) continue;
         // Off-limits doors leave the denominator entirely, so a finished
         // territory actually reaches 100%.
         if (isExcluded(h.status)) {
@@ -252,7 +240,7 @@ export default function Page() {
       }
       return { total, worked, excluded };
     },
-    [data.housesByTerritory, isContainer]
+    [data.housesByTerritory]
   );
 
   const activeTerritory = activeTerritoryId ? territoryById.get(activeTerritoryId) ?? null : null;
@@ -266,10 +254,7 @@ export default function Page() {
     let excluded = 0;
     let buildings = 0;
     for (const h of list) {
-      if (isContainer(h)) {
-        buildings++;
-        continue;
-      }
+      if (h.kind === "complex") buildings++;
       counts.set(h.status, (counts.get(h.status) ?? 0) + 1);
       if (isExcluded(h.status)) {
         excluded++;
@@ -279,7 +264,7 @@ export default function Page() {
       if (STATUS_MAP[h.status]?.worked) worked++;
     }
     return { counts, worked, excluded, total, buildings };
-  }, [activeTerritoryId, data.housesByTerritory, isContainer]);
+  }, [activeTerritoryId, data.housesByTerritory]);
 
   const selectedHouse = useMemo(
     () => data.houses.find((h) => h.id === selectedHouseId) ?? null,
@@ -396,12 +381,7 @@ export default function Page() {
       // printed map onto roughly the right block.
       if (mode === "move" && moveTargetId) {
         const target = data.houses.find((h) => h.id === moveTargetId);
-        const to = { lat: point[0], lng: point[1] };
-        data.updateHouse(moveTargetId, to);
-        // Every door inside a building shares its coordinates, so they travel
-        // with it — otherwise the units stay behind at the old spot.
-        const units = data.unitsByComplex.get(moveTargetId) ?? [];
-        if (units.length > 0) data.updateHouses(units.map((u) => u.id), to);
+        data.updateHouse(moveTargetId, { lat: point[0], lng: point[1] });
         setMode("idle");
         setMoveTargetId(null);
         setSelectedHouseId(moveTargetId);
@@ -459,11 +439,6 @@ export default function Page() {
   // ---- export -------------------------------------------------------------
   const exportCsv = useCallback(() => {
     const escape = (value: string) => `"${(value ?? "").replace(/"/g, '""')}"`;
-    // Units carry only their door number, so the building name has to travel
-    // with them or the spreadsheet is full of bare "101"s from nowhere.
-    const buildings = new Map(
-      data.houses.filter((h) => h.kind === "complex").map((h) => [h.id, h.name || h.address])
-    );
     const rows = [
       [
         "Territory",
@@ -479,8 +454,8 @@ export default function Page() {
       ],
       ...data.houses.map((h) => [
         territoryById.get(h.territory_id ?? "")?.name ?? "",
-        h.kind === "complex" ? "Building" : h.kind === "unit" ? "Unit" : "House",
-        h.kind === "unit" ? (buildings.get(h.parent_id ?? "") ?? "") : h.kind === "complex" ? h.name : "",
+        h.kind === "complex" ? "Building" : "House",
+        h.kind === "complex" ? h.name : "",
         h.address,
         STATUS_MAP[h.status]?.label ?? h.status,
         h.notes ?? "",
@@ -564,7 +539,6 @@ export default function Page() {
           basemap={basemap}
           territories={data.territories}
           houses={data.houses}
-          unitsByComplex={data.unitsByComplex}
           activeTerritoryId={activeTerritoryId}
           selectedHouseId={selectedHouseId}
           onDrawProgress={setDrawCount}
@@ -608,8 +582,11 @@ export default function Page() {
                       (activeBreakdown.excluded > 0
                         ? ` · ${activeBreakdown.excluded} off limits`
                         : "")}
+                {/* "incl." rather than a bare count: buildings are already in
+                    the door total, and listing them alongside it reads as if
+                    they were extra. */}
                 {activeBreakdown.buildings > 0
-                  ? ` · ${activeBreakdown.buildings} building${
+                  ? ` · incl. ${activeBreakdown.buildings} building${
                       activeBreakdown.buildings === 1 ? "" : "s"
                     }`
                   : ""}
@@ -851,44 +828,12 @@ export default function Page() {
       {selectedHouse && selectedHouse.kind === "complex" && mode !== "move" && (
         <ComplexSheet
           complex={selectedHouse}
-          units={data.unitsByComplex.get(selectedHouse.id) ?? []}
           territoryName={territoryById.get(selectedHouse.territory_id ?? "")?.name ?? null}
           onClose={() => setSelectedHouseId(null)}
           onRename={(name) => data.updateHouse(selectedHouse.id, { name })}
           onAddress={(address) => data.updateHouse(selectedHouse.id, { address })}
           onNotes={(notes) => data.updateHouse(selectedHouse.id, { notes })}
           onStatus={setStatus}
-          onAddUnits={async (labels) => {
-            try {
-              await data.addHouses(
-                labels.map((label) => ({
-                  // Units inherit the building's territory and coordinates, so
-                  // they land in the right area stats and travel with the pin.
-                  territory_id: selectedHouse.territory_id,
-                  lat: selectedHouse.lat,
-                  lng: selectedHouse.lng,
-                  address: label,
-                  kind: "unit" as const,
-                  parent_id: selectedHouse.id,
-                }))
-              );
-              pushToast(
-                `Added ${labels.length} door${labels.length === 1 ? "" : "s"} to ${
-                  selectedHouse.name || "this building"
-                }.`,
-                "ok"
-              );
-            } catch (err) {
-              pushToast(
-                err instanceof Error ? `Could not add those doors: ${err.message}` : "Could not add those doors.",
-                "err"
-              );
-            }
-          }}
-          onUnitStatus={(unitId, status) => data.updateHouse(unitId, { status })}
-          onUnitNotes={(unitId, notes) => data.updateHouse(unitId, { notes })}
-          onDeleteUnit={(unitId) => data.deleteHouse(unitId)}
-          onBulkStatus={(ids, status) => data.updateHouses(ids, { status })}
           onMove={() => {
             setMoveTargetId(selectedHouse.id);
             setSelectedHouseId(null);

@@ -3,7 +3,7 @@
 import { useEffect, useImperativeHandle, useRef, type MutableRefObject } from "react";
 import L from "leaflet";
 import type { House, LatLng, Territory } from "@/lib/types";
-import { STATUS_MAP, complexProgress } from "@/lib/types";
+import { STATUS_MAP } from "@/lib/types";
 import {
   describeLocationError,
   getPermissionState,
@@ -33,8 +33,6 @@ interface MapViewProps {
   basemap: Basemap;
   territories: Territory[];
   houses: House[];
-  /** The doors inside each apartment building, keyed by the building's id. */
-  unitsByComplex: Map<string, House[]>;
   activeTerritoryId: string | null;
   selectedHouseId: string | null;
   onDrawProgress: (pointCount: number) => void;
@@ -74,27 +72,15 @@ const MARKER_MIN_ZOOM = 15;
  */
 const COMPLEX_MIN_ZOOM = 12;
 
-/** How a building reads at a glance: untouched, part-done, finished, off limits. */
-function complexTone(house: House, units: House[]): { color: string; count: string } {
-  if (units.length === 0) {
-    const meta = STATUS_MAP[house.status] ?? STATUS_MAP.not_knocked;
-    return { color: meta.color, count: "" };
-  }
-  const { total, worked, excluded } = complexProgress(units);
-  if (total === 0) return { color: "#1f2937", count: `${excluded} off limits` };
-  const color = worked >= total ? "#22c55e" : worked > 0 ? "#f59e0b" : "#64748b";
-  return { color, count: `${worked}/${total}` };
-}
-
 /**
  * Built as DOM rather than an HTML string: building names are typed by reps,
  * and interpolating one into innerHTML would run whatever it contained.
  */
-function complexPin(house: House, units: House[], selected: boolean): HTMLElement {
-  const { color, count } = complexTone(house, units);
+function complexPin(house: House, selected: boolean): HTMLElement {
+  const meta = STATUS_MAP[house.status] ?? STATUS_MAP.not_knocked;
 
   const root = document.createElement("div");
-  root.style.setProperty("--pin", color);
+  root.style.setProperty("--pin", meta.color);
 
   const chip = document.createElement("div");
   chip.className = `complex-chip${selected ? " is-selected" : ""}`;
@@ -103,13 +89,6 @@ function complexPin(house: House, units: House[], selected: boolean): HTMLElemen
   name.className = "complex-chip-name";
   name.textContent = house.name || house.address || "Apartments";
   chip.appendChild(name);
-
-  if (count) {
-    const badge = document.createElement("span");
-    badge.className = "complex-chip-count";
-    badge.textContent = count;
-    chip.appendChild(badge);
-  }
 
   const stem = document.createElement("span");
   stem.className = "complex-stem";
@@ -349,10 +328,8 @@ export default function MapView(props: MapViewProps) {
     const stroke = zoom >= 17 ? 2 : 1;
 
     for (const h of houses) {
-      // Buildings get their own labelled pins below, and every unit sits at
-      // exactly its building's coordinates — drawn here they would be one dot
-      // hiding eighty others, and the top one would win every tap.
-      if (h.kind !== "house") continue;
+      // Buildings get their own labelled pins below.
+      if (h.kind === "complex") continue;
       if (!bounds.contains([h.lat, h.lng])) continue;
       wanted.add(h.id);
 
@@ -404,7 +381,7 @@ export default function MapView(props: MapViewProps) {
     const layer = complexLayerRef.current;
     if (!map || !layer) return;
 
-    const { houses, unitsByComplex, selectedHouseId, activeTerritoryId } = propsRef.current;
+    const { houses, selectedHouseId, activeTerritoryId } = propsRef.current;
     layer.clearLayers();
     if (map.getZoom() < COMPLEX_MIN_ZOOM) return;
 
@@ -413,11 +390,10 @@ export default function MapView(props: MapViewProps) {
       if (h.kind !== "complex") continue;
       if (!bounds.contains([h.lat, h.lng])) continue;
 
-      const units = unitsByComplex.get(h.id) ?? [];
       const marker = L.marker([h.lat, h.lng], {
         icon: L.divIcon({
           className: "complex-marker",
-          html: complexPin(h, units, h.id === selectedHouseId),
+          html: complexPin(h, h.id === selectedHouseId),
           iconSize: [0, 0],
         }),
         // Above the house dots: a building is the bigger prize on the street,
@@ -440,7 +416,7 @@ export default function MapView(props: MapViewProps) {
     renderHouses();
     renderComplexes();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.houses, props.unitsByComplex, props.selectedHouseId, props.activeTerritoryId]);
+  }, [props.houses, props.selectedHouseId, props.activeTerritoryId]);
 
   // ---- freehand / tap drawing --------------------------------------------
   useEffect(() => {
